@@ -31,6 +31,7 @@ export interface SparkNotifyAgentDeps {
   stream: (
     model: string,
     provider: ChatProvider,
+    promptNode: Message,
     messages: Message[],
     options: {
       tools?: any[]
@@ -42,14 +43,14 @@ export interface SparkNotifyAgentDeps {
   getActiveProvider: () => string | undefined
   getActiveModel: () => string | undefined
   getProviderInstance: <R extends
-  | ChatProvider
-  | ChatProviderWithExtraOptions
-  | EmbedProvider
-  | EmbedProviderWithExtraOptions
-  | SpeechProvider
-  | SpeechProviderWithExtraOptions
-  | TranscriptionProvider
-  | TranscriptionProviderWithExtraOptions,
+    | ChatProvider
+    | ChatProviderWithExtraOptions
+    | EmbedProvider
+    | EmbedProviderWithExtraOptions
+    | SpeechProvider
+    | SpeechProviderWithExtraOptions
+    | TranscriptionProvider
+    | TranscriptionProviderWithExtraOptions,
   >(name: string,
   ) => Promise<R>
   onReactionDelta: (eventId: string, text: string) => void
@@ -136,20 +137,20 @@ export function setupAgentSparkNotifyHandler(deps: SparkNotifyAgentDeps) {
               destinations: cmd.destinations,
               guidance: cmd.guidance
                 ? {
-                    type: cmd.guidance.type,
-                    persona: cmd.guidance?.persona?.reduce((acc, curr) => {
-                      acc[curr.traits] = curr.strength
-                      return acc
-                    }, {} as Record<string, 'very-high' | 'high' | 'medium' | 'low' | 'very-low'>) || undefined,
-                    options: cmd.guidance.options.map(opt => ({
-                      ...opt,
-                      rationale: opt.rationale ?? undefined,
-                      possibleOutcome: opt.possibleOutcome?.length ? opt.possibleOutcome : undefined,
-                      risk: opt.risk ?? undefined,
-                      fallback: opt.fallback?.length ? opt.fallback : undefined,
-                      triggers: opt.triggers?.length ? opt.triggers : undefined,
-                    })),
-                  }
+                  type: cmd.guidance.type,
+                  persona: cmd.guidance?.persona?.reduce((acc, curr) => {
+                    acc[curr.traits] = curr.strength
+                    return acc
+                  }, {} as Record<string, 'very-high' | 'high' | 'medium' | 'low' | 'very-low'>) || undefined,
+                  options: cmd.guidance.options.map(opt => ({
+                    ...opt,
+                    rationale: opt.rationale ?? undefined,
+                    possibleOutcome: opt.possibleOutcome?.length ? opt.possibleOutcome : undefined,
+                    risk: opt.risk ?? undefined,
+                    fallback: opt.fallback?.length ? opt.fallback : undefined,
+                    triggers: opt.triggers?.length ? opt.triggers : undefined,
+                  })),
+                }
                 : undefined,
               // TODO: contexts can be added later
               contexts: [],
@@ -188,7 +189,7 @@ export function setupAgentSparkNotifyHandler(deps: SparkNotifyAgentDeps) {
 
     let fullText = ''
 
-    await deps.stream(activeModel, chatProvider, [systemMessage, userMessage], {
+    await deps.stream(activeModel, chatProvider, systemMessage, [userMessage], {
       tools: [
         sparkNoResponseTool,
         sparkCommandTool,

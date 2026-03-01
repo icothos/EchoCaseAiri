@@ -11,6 +11,10 @@ import { chatSessionsRepo } from '../../database/repos/chat-sessions.repo'
 import { type SessionTtsSegmentStartedPayload, getSessionBusContext, sessionTtsSegmentStartedEvent } from '../../services/session/bus'
 import { useAuthStore } from '../auth'
 import { useAiriCardStore } from '../modules/airi-card'
+export interface PromptOptions {
+  enableCodeBlockOptions?: boolean
+  enableMathSyntax?: boolean
+}
 
 export const useChatSessionStore = defineStore('chat-session', () => {
   const { userId, isAuthenticated } = storeToRefs(useAuthStore())
@@ -173,8 +177,11 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     })
   }
 
-  function generateInitialMessageFromPrompt(prompt: string) {
-    const content = codeBlockSystemPrompt + mathSyntaxSystemPrompt + prompt
+  function generateInitialMessageFromPrompt(prompt: string, options?: PromptOptions) {
+    let content = ''
+    if (options?.enableCodeBlockOptions) content += codeBlockSystemPrompt
+    if (options?.enableMathSyntax) content += mathSyntaxSystemPrompt
+    content += prompt
 
     return {
       role: 'system',
@@ -184,8 +191,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     } satisfies ChatHistoryItem
   }
 
-  function generateInitialMessage() {
-    return generateInitialMessageFromPrompt(systemPrompt.value)
+  function getPromptNode(options?: PromptOptions): ChatHistoryItem {
+    return generateInitialMessageFromPrompt(systemPrompt.value, options)
   }
 
   function ensureGeneration(sessionId: string) {
@@ -285,7 +292,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
       updatedAt: now,
     }
 
-    const initialMessages = options?.messages?.length ? options.messages : [generateInitialMessage()]
+    const initialMessages = options?.messages?.length ? options.messages : []
 
     sessionMetas.value[sessionId] = meta
     sessionMessages.value[sessionId] = initialMessages
@@ -378,8 +385,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
 
   function ensureSession(sessionId: string) {
     ensureGeneration(sessionId)
-    if (!sessionMessages.value[sessionId] || sessionMessages.value[sessionId].length === 0) {
-      sessionMessages.value[sessionId] = [generateInitialMessage()]
+    if (!sessionMessages.value[sessionId]) {
+      sessionMessages.value[sessionId] = []
       void persistSession(sessionId)
     }
   }
@@ -419,7 +426,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   function cleanupMessages(sessionId = activeSessionId.value) {
     ensureGeneration(sessionId)
     sessionGenerations.value[sessionId] += 1
-    setSessionMessages(sessionId, [generateInitialMessage()])
+    setSessionMessages(sessionId, [])
     // 다음 loadSession 호출 시 DB에서 다시 읽도록 캐시 제거
     loadedSessions.delete(sessionId)
   }
@@ -659,6 +666,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     cleanupMessages,
     getAllSessions,
     resetAllSessions,
+    getPromptNode,
 
     ensureSession,
     setSessionMessages,

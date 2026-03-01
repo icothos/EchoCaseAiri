@@ -28,6 +28,7 @@ interface SendOptions {
   attachments?: { type: 'image', data: string, mimeType: string }[]
   tools?: StreamOptions['tools']
   input?: WebSocketEventInputs
+  promptOptions?: import('./chat/session-store').PromptOptions
 }
 
 interface ForkOptions {
@@ -298,7 +299,9 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       if (shouldAbort())
         return
 
-      await llmStore.stream(options.model, options.chatProvider, newMessages as Message[], {
+      const promptNode = chatSession.getPromptNode(options.promptOptions) as Message
+
+      await llmStore.stream(options.model, options.chatProvider, promptNode, newMessages as Message[], {
         headers,
         tools: options.tools,
         onStreamEvent: async (event: StreamEvent) => {

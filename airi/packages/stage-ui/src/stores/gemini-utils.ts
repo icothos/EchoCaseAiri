@@ -40,6 +40,7 @@ export function isGeminiProvider(chatProvider: ChatProvider, model: string): boo
 export async function streamGeminiNative(
     model: string,
     apiKey: string,
+    promptNode: Message,
     messages: Message[],
     tools: Tool[] | undefined,
     onEvent: (event: any) => Promise<void>,
@@ -57,6 +58,7 @@ export async function streamGeminiNative(
     await streamGemini({
         apiKey,
         model,
+        promptNode: promptNode as any,
         messages: messages as any,
         tools: geminiTools,
         onEvent,

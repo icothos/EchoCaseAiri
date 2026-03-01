@@ -178,14 +178,14 @@ export const useAiriCardStore = defineStore('airi-card', () => {
         postHistoryInstructions: ccv3Card.data.post_history_instructions ?? '',
         messageExample: ccv3Card.data.mes_example
           ? ccv3Card.data.mes_example
-              .split('<START>\n')
-              .filter(Boolean)
-              .map(example => example.split('\n')
-                .map((line) => {
-                  if (line.startsWith('{{char}}:') || line.startsWith('{{user}}:'))
-                    return line as `{{char}}: ${string}` | `{{user}}: ${string}`
-                  throw new Error(`Invalid message example format: ${line}`)
-                }))
+            .split('<START>\n')
+            .filter(Boolean)
+            .map(example => example.split('\n')
+              .map((line) => {
+                if (line.startsWith('{{char}}:') || line.startsWith('{{user}}:'))
+                  return line as `{{char}}: ${string}` | `{{user}}: ${string}`
+                throw new Error(`Invalid message example format: ${line}`)
+              }))
           : [],
         tags: ccv3Card.data.tags ?? [],
         extensions: {
@@ -272,13 +272,30 @@ export const useAiriCardStore = defineStore('airi-card', () => {
       if (!card)
         return ''
 
+      // If it's the builtin 'default' card, always render the persona dynamically
+      // to ensure `base.yaml` translations are fully loaded and reactive via i18n
+      if (activeCardId.value === 'default') {
+        const dynamicBuiltinPersona = SystemPromptV2(
+          t('base.prompt.prefix'),
+          t('base.prompt.suffix')
+        ).content as string
+
+        const components = [
+          card.systemPrompt,
+          dynamicBuiltinPersona, // Use the dynamically translated persona
+          card.personality,
+        ].filter(Boolean)
+
+        return components.join('\n\n')
+      }
+
       const components = [
         card.systemPrompt,
         card.description,
         card.personality,
       ].filter(Boolean)
 
-      return components.join('\n')
+      return components.join('\n\n')
     }),
   }
 })
