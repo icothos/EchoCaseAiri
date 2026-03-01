@@ -3,10 +3,7 @@ import type { StreamingAssistantMessage } from '../../types/chat'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-import { useChatSessionStore } from './session-store'
-
 export const useChatStreamStore = defineStore('chat-stream', () => {
-  const chatSession = useChatSessionStore()
   const streamingMessage = ref<StreamingAssistantMessage>({ role: 'assistant', content: '', slices: [], tool_results: [], createdAt: Date.now() })
 
   function beginStream() {
@@ -28,15 +25,8 @@ export const useChatStreamStore = defineStore('chat-stream', () => {
     })
   }
 
-  function finalizeStream(fullText?: string) {
-    const sessionId = chatSession.activeSessionId
-    const sessionMessagesForSend = chatSession.getSessionMessages(sessionId)
-    if (streamingMessage.value.slices.length > 0)
-      sessionMessagesForSend.push(streamingMessage.value)
-    chatSession.persistSessionMessages(sessionId)
+  function finalizeStream(_fullText?: string) {
     streamingMessage.value = { role: 'assistant', content: '', slices: [], tool_results: [] }
-    if (fullText)
-      streamingMessage.value.content = fullText
   }
 
   function resetStream() {

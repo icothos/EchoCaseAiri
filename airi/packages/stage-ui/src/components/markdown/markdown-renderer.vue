@@ -15,18 +15,27 @@ const props = defineProps<Props>()
 const processedContent = ref('')
 const { process, processSync } = useMarkdown()
 
+let lastRequestId = 0
+
 async function processContent() {
+  const currentRequestId = ++lastRequestId
+
   if (!props.content) {
     processedContent.value = ''
     return
   }
 
   try {
-    processedContent.value = DOMPurify.sanitize(await process(props.content))
+    const result = DOMPurify.sanitize(await process(props.content))
+    if (currentRequestId === lastRequestId) {
+      processedContent.value = result
+    }
   }
   catch (error) {
     console.warn('Failed to process markdown with syntax highlighting, using fallback:', error)
-    processedContent.value = DOMPurify.sanitize(processSync(props.content))
+    if (currentRequestId === lastRequestId) {
+      processedContent.value = DOMPurify.sanitize(processSync(props.content))
+    }
   }
 }
 

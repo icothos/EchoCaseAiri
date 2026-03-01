@@ -124,7 +124,6 @@ const historyMessages = computed(() => messages.value as unknown as ChatHistoryI
       <ChatHistory
         :messages="historyMessages"
         :sending="sending"
-        :streaming-message="streamingMessage"
       />
     </div>
     <div v-if="attachments.length > 0" class="flex flex-wrap gap-2 border-t border-primary-100 p-2">
