@@ -80,34 +80,32 @@ export function mountEchoMemory(
 
     const cleanups: Array<() => void> = []
 
-    // ① Bouncer: input:text 이벤트 가로채기
-    cleanups.push(serverChannelStore.onEvent('input:text', async (event: any) => {
-        const text: string = event?.data?.text ?? event?.text ?? ''
-        if (!text)
-            return
+    // ① Hot Context 주입 및 Bouncer: LLM 호출 직전
+    // (Bouncer가 await 되어야 메인 LLM이 기다려 줌)
+    cleanups.push(chatOrchestratorStore.onBeforeMessageComposed(async (messageText) => {
+        // Bouncer 처리
+        const text: string = messageText ?? ''
 
-        if (isDuplicate(text))
-            return
+        if (text && !isDuplicate(text)) {
+            const result = await bouncer.route(text)
 
-        const result = await bouncer.route(text)
+            if (result.action === 'ignore') {
+                // eslint-disable-next-line no-console
+                console.debug('[echo-memory] Bouncer: ignore', text.slice(0, 40))
+                // 중요: onBeforeMessageComposed에서 에러를 던지면 ingest(메인 LLM)가 중단됨
+                throw new Error('BOUNCER_IGNORE')
+            }
 
-        if (result.action === 'ignore') {
-            // eslint-disable-next-line no-console
-            console.debug('[echo-memory] Bouncer: ignore', text.slice(0, 40))
-            return
+            if (result.action === 'rag') {
+                // TODO P8: Cold DB 벡터 검색
+                // eslint-disable-next-line no-console
+                console.debug('[echo-memory] Bouncer: rag (미구현)', text.slice(0, 40))
+            }
+
+            summarizer.addMessage('user', result.cleanText || text)
         }
 
-        if (result.action === 'rag') {
-            // TODO P8: Cold DB 벡터 검색
-            // eslint-disable-next-line no-console
-            console.debug('[echo-memory] Bouncer: rag (미구현)', text.slice(0, 40))
-        }
-
-        summarizer.addMessage('user', result.cleanText || text)
-    }))
-
-    // ② Hot Context 주입: LLM 호출 직전
-    cleanups.push(chatOrchestratorStore.onBeforeMessageComposed(async () => {
+        // Hot Context 주입
         const topNodes = pool.getTopK()
         for (const node of topNodes) {
             const id = nanoid()

@@ -120,6 +120,10 @@ async function handleSend() {
     })
   }
   catch (error) {
+    if ((error as Error).message === 'BOUNCER_IGNORE') {
+      return
+    }
+    
     messageInput.value = textToSend
     messages.value.pop()
     messages.value.push({

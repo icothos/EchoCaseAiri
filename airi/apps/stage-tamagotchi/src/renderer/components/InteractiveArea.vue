@@ -7,6 +7,7 @@ import { ChatHistory } from '@proj-airi/stage-ui/components'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatMaintenanceStore } from '@proj-airi/stage-ui/stores/chat/maintenance'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
+import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { BasicTextarea } from '@proj-airi/ui'
@@ -21,6 +22,7 @@ const attachments = ref<{ type: 'image', data: string, mimeType: string, url: st
 
 const chatOrchestrator = useChatOrchestratorStore()
 const chatSession = useChatSessionStore()
+const serverChannelStore = useModsServerChannelStore()
 const { cleanupMessages } = useChatMaintenanceStore()
 const { ingest, onAfterMessageComposed, discoverToolsCompatibility } = chatOrchestrator
 const { messages } = storeToRefs(chatSession)
@@ -48,6 +50,10 @@ async function handleSend() {
 
   try {
     const providerConfig = providersStore.getProviderConfig(activeProvider.value)
+    
+    // Broadcast text to server channel so echo-memory Bouncer can intercept it
+    serverChannelStore.send('input:text', { text: textToSend })
+
     await ingest(textToSend, {
       model: activeModel.value,
       chatProvider: await providersStore.getProviderInstance<ChatProvider>(activeProvider.value),
@@ -59,6 +65,11 @@ async function handleSend() {
     attachmentsToSend.forEach(att => URL.revokeObjectURL(att.url))
   }
   catch (error) {
+    if ((error as Error).message === 'BOUNCER_IGNORE') {
+      // Intentional block by the Bouncer, silent drop
+      return
+    }
+
     // restore on failure
     messageInput.value = textToSend
     attachments.value = attachmentsToSend.map(att => ({

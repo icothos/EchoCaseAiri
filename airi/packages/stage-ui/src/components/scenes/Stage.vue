@@ -347,7 +347,7 @@ playbackManager.onStart(({ item }) => {
 })
 
 playbackManager.onEnd(({ item }) => {
-  if (item.text && !item.special)    // Removed TTS log per user requested
+  if (item.text && !item.special) {   // Removed TTS log per user requested
     // ;(window as any).logChat?.(`[TTS onEnd] sessionId=${item.sessionId ?? 'none'} text=${item.text.slice(0, 40)}`)
     const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
     ;(window as any).logChat?.(`[${ts}] [Airi] ${item.text}`)
