@@ -98,7 +98,7 @@ export interface IntentHandle {
   writeSpecial: (special: string) => void
   writeFlush: () => void
   end: () => void
-  cancel: (reason?: string) => void
+  cancel: (reason?: string, options?: { keepActive?: boolean }) => void
   stream: ReadableStream<TextToken>
 }
 

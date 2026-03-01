@@ -26,11 +26,13 @@ export interface SpeechPipelineOptions<TAudio> {
     schedule: (item: PlaybackItem<TAudio>) => void
     stopAll: (reason: string) => void
     stopByIntent: (intentId: string, reason: string) => void
+    clearWaitingByIntent?: (intentId: string, reason: string) => void
     stopByOwner: (ownerId: string, reason: string) => void
     onStart: (listener: (event: { item: PlaybackItem<TAudio>, startedAt: number }) => void) => void
     onEnd: (listener: (event: { item: PlaybackItem<TAudio>, endedAt: number }) => void) => void
     onInterrupt: (listener: (event: { item: PlaybackItem<TAudio>, reason: string, interruptedAt: number }) => void) => void
     onReject: (listener: (event: { item: PlaybackItem<TAudio>, reason: string }) => void) => void
+    getWaitingCount?: () => number
   }
   logger?: LoggerLike
   priority?: ReturnType<typeof createPriorityResolver>
@@ -120,6 +122,17 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
         }
 
         context.emit(speechPipelineEventMap.onTtsRequest, request)
+
+        if (options.playback.getWaitingCount) {
+          while (options.playback.getWaitingCount() >= 2) {
+            if (intent.canceled || intent.controller.signal.aborted)
+              break
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+        }
+
+        if (intent.controller.signal.aborted)
+          break
 
         let audio: TAudio | null = null
         try {
@@ -259,8 +272,8 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
       end() {
         close()
       },
-      cancel(reason?: string) {
-        cancelIntent(intentId, reason)
+      cancel(reason?: string, options?: { keepActive?: boolean }) {
+        cancelIntent(intentId, reason, options)
       },
     }
 
@@ -285,7 +298,7 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
     return handle
   }
 
-  function cancelIntent(intentId: string, reason?: string) {
+  function cancelIntent(intentId: string, reason?: string, optionsInput?: { keepActive?: boolean }) {
     const intent = intents.get(intentId)
     if (!intent)
       return
@@ -294,7 +307,11 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
     intent.closeStream()
 
     if (activeIntent?.intentId === intentId) {
-      options.playback.stopByIntent(intentId, reason ?? 'canceled')
+      if (optionsInput?.keepActive && options.playback.clearWaitingByIntent) {
+        options.playback.clearWaitingByIntent(intentId, reason ?? 'canceled')
+      } else {
+        options.playback.stopByIntent(intentId, reason ?? 'canceled')
+      }
       return
     }
 

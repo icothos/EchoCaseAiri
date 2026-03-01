@@ -66,6 +66,7 @@ const {
   live2dForceAutoBlinkEnabled,
   live2dShadowEnabled,
   live2dMaxFps,
+  hardInterrupt,
 } = storeToRefs(settingsStore)
 const { mouthOpenSize } = storeToRefs(useSpeakingStore())
 const { audioContext } = useAudioContext()
@@ -324,7 +325,10 @@ const speechPipeline = createSpeechPipeline<AudioBuffer>({
       return null
     }
   },
-  playback: playbackManager,
+  playback: {
+    ...playbackManager,
+    getWaitingCount: playbackManager.getWaitingCount,
+  },
 })
 
 void speechRuntimeStore.registerHost(speechPipeline)
@@ -427,7 +431,6 @@ function setupAnalyser() {
 let currentChatIntent: ReturnType<typeof speechRuntimeStore.openIntent> | null = null
 
 chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
-  playbackManager.stopAll('new-message')
 
   setupAnalyser()
   await setupLipSync()
@@ -447,7 +450,7 @@ chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
   }
 
   if (currentChatIntent) {
-    currentChatIntent.cancel('new-message')
+    currentChatIntent.cancel('new-message', { keepActive: !hardInterrupt.value })
     currentChatIntent = null
   }
 

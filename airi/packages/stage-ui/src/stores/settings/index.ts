@@ -74,6 +74,7 @@ export const useSettings = defineStore('settings', () => {
     // UI settings
     allowVisibleOnAllWorkspaces: controlsIslandRefs.allowVisibleOnAllWorkspaces,
     controlsIslandIconSize: controlsIslandRefs.controlsIslandIconSize,
+    hardInterrupt: generalRefs.hardInterrupt,
 
     // Methods
     setThemeColorsHue: theme.setThemeColorsHue,

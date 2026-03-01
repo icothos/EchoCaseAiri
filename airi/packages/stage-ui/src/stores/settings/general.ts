@@ -33,6 +33,8 @@ export const useSettingsGeneral = defineStore('settings-general', () => {
 
   const websocketSecureEnabled = useLocalStorageManualReset<boolean>('settings/websocket/secure-enabled', false)
 
+  const hardInterrupt = useLocalStorageManualReset<boolean>('settings/hard-interrupt', false)
+
   function getLanguage() {
     let language = localStorage.getItem('settings/language')
 
@@ -56,6 +58,7 @@ export const useSettingsGeneral = defineStore('settings-general', () => {
     disableTransitions.reset()
     usePageSpecificTransitions.reset()
     websocketSecureEnabled.reset()
+    hardInterrupt.reset()
   }
 
   onMounted(() => language.value = getLanguage())
@@ -65,6 +68,7 @@ export const useSettingsGeneral = defineStore('settings-general', () => {
     disableTransitions,
     usePageSpecificTransitions,
     websocketSecureEnabled,
+    hardInterrupt,
     getLanguage,
     resetState,
   }
