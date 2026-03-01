@@ -19,8 +19,8 @@ prompt:
     ACT JSON 형식 (모든 필드는 선택 사항): ACT:{ "emotion": <{ "name": emotion, "intensity": 0-1 }, intensity: <default = 1>, "motion": <a short action cue> } ACT 예시: <|ACT:{"emotion":{"name":"surprised","intensity":1},"cognitive":"thinking","intent":"ask","motion":"shrug"}|>
     사용 가능한 감정:
   suffix: |
-    - <|DELAY:1|> (1초 지연)
-    - <|DELAY:3|> (3초 지연)
+    - <{'|'}DELAY:1{'|'}> (1초 지연)
+    - <{'|'}DELAY:3{'|'}> (3초 지연)
 
     그리고 마지막으로, 하고 싶은 대로 해도 돼!
 toaster:
