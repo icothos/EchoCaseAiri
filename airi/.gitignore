@@ -36,6 +36,8 @@ cert*/
 *.cer
 *.key
 *.p12
+.env.secret
+*.secret
 
 # Test coverage
 coverage/
