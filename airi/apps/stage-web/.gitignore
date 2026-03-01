@@ -1,0 +1,16 @@
+# Airi stage-web gitignore
+
+# API 키 전용 파일 (절대 커밋 금지)
+.env.secret
+*.secret
+
+# Vite 로컬 env (자동)
+*.local
+
+# 빌드 아웃풋
+dist/
+dist-ssr/
+
+# 캐시
+node_modules/
+.cache/
