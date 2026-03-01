@@ -42,6 +42,7 @@ interface IntentState {
   streamId: string
   priority: number
   ownerId?: string
+  sessionId?: string
   behavior: 'queue' | 'interrupt' | 'replace'
   createdAt: number
   controller: AbortController
@@ -155,6 +156,7 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
           intentId: ttsResult.intentId,
           segmentId: ttsResult.segmentId,
           ownerId: intent.ownerId,
+          sessionId: intent.sessionId,
           priority: intent.priority,
           text: ttsResult.text,
           special: ttsResult.special,
@@ -191,6 +193,7 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
     const priority = priorityResolver.resolve(optionsInput?.priority)
     const behavior = optionsInput?.behavior ?? 'queue'
     const ownerId = optionsInput?.ownerId
+    const sessionId = optionsInput?.sessionId
 
     const controller = new AbortController()
     const { stream, write, close } = createPushStream<TextToken>()
@@ -201,6 +204,7 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
       streamId,
       priority,
       ownerId,
+      sessionId,
       behavior,
       createdAt: Date.now(),
       controller,

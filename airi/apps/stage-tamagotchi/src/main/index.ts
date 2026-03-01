@@ -51,6 +51,13 @@ ipcMain.handle('log:llm', (_event, line: string) => {
   catch { /* 로그 실패는 무시 */ }
 })
 
+ipcMain.handle('log:chat', (_event, line: string) => {
+  try {
+    appendFileSync(join(getLogsDir(), 'chat.log'), line + '\n', 'utf-8')
+  }
+  catch { /* 로그 실패는 무시 */ }
+})
+
 ipcMain.setMaxListeners(100)
 
 setElectronMainDirname(__dirname)

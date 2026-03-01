@@ -8,6 +8,7 @@ import { computed, ref, watch } from 'vue'
 import { client } from '../../composables/api'
 import { useLocalFirstRequest } from '../../composables/use-local-first'
 import { chatSessionsRepo } from '../../database/repos/chat-sessions.repo'
+import { type SessionSpokenCommitPayload, getSessionBusContext, sessionSpokenCommitEvent } from '../../services/session/bus'
 import { useAuthStore } from '../auth'
 import { useAiriCardStore } from '../modules/airi-card'
 
@@ -117,8 +118,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
           | { type: 'user', userId: string }
           | { type: 'character', characterId: string }
         > = [
-          { type: 'user', userId: userId.value },
-        ]
+            { type: 'user', userId: userId.value },
+          ]
 
         if (cachedRecord.meta.characterId && cachedRecord.meta.characterId !== 'default') {
           members.push({
@@ -342,7 +343,26 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     if (initializePromise)
       return initializePromise
     initializing.value = true
+    bindSessionBus()
     initializePromise = (async () => {
+      // 개발 환경: VITE_DEV_CLEAR_CHAT=1 이면 세션 로드 전에 DB 먼저 초기화
+      if (import.meta.env.DEV && import.meta.env.VITE_DEV_CLEAR_CHAT === '1') {
+        const currentUserId = getCurrentUserId()
+        // DB에서 index 강제 로드해서 모든 sessionId 수집 후 삭제
+        const existingIndex = await chatSessionsRepo.getIndex(currentUserId)
+        if (existingIndex) {
+          for (const character of Object.values(existingIndex.characters)) {
+            for (const sessionId of Object.keys(character.sessions))
+              await chatSessionsRepo.deleteSession(sessionId)
+          }
+        }
+        // 빈 index 저장
+        await chatSessionsRepo.saveIndex({ userId: currentUserId, characters: {} })
+        index.value = { userId: currentUserId, characters: {} }
+        // eslint-disable-next-line no-console
+        console.debug('[session-store] VITE_DEV_CLEAR_CHAT: chat DB cleared')
+      }
+
       await ensureActiveSessionForCharacter()
       ready.value = true
     })()
@@ -355,6 +375,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
       initializing.value = false
     }
   }
+
 
   function ensureSession(sessionId: string) {
     ensureGeneration(sessionId)
@@ -400,6 +421,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     ensureGeneration(sessionId)
     sessionGenerations.value[sessionId] += 1
     setSessionMessages(sessionId, [generateInitialMessage()])
+    // 다음 loadSession 호출 시 DB에서 다시 읽도록 캐시 제거
+    loadedSessions.delete(sessionId)
   }
 
   function getAllSessions() {
@@ -411,15 +434,30 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     const characterId = getCurrentCharacterId()
     const sessionIds = new Set<string>()
 
-    if (index.value?.userId === currentUserId) {
+    // index가 아직 로드되지 않았거나 userId가 다르면 DB에서 강제 로드
+    if (!index.value || index.value.userId !== currentUserId)
+      await loadIndexForUser(currentUserId)
+
+    if (index.value) {
       for (const character of Object.values(index.value.characters)) {
         for (const sessionId of Object.keys(character.sessions))
           sessionIds.add(sessionId)
       }
     }
 
+    // 현재 메모리에 있는 세션도 모두 포함
+    for (const sessionId of Object.keys(sessionMessages.value))
+      sessionIds.add(sessionId)
+    for (const sessionId of Object.keys(sessionMetas.value))
+      sessionIds.add(sessionId)
+
+    // 모든 세션 DB에서 삭제
     for (const sessionId of sessionIds)
       await enqueuePersist(() => chatSessionsRepo.deleteSession(sessionId))
+
+    // 빈 index를 DB에 명시적으로 저장
+    const emptyIndex = { userId: currentUserId, characters: {} }
+    await enqueuePersist(() => chatSessionsRepo.saveIndex(emptyIndex))
 
     sessionMessages.value = {}
     sessionMetas.value = {}
@@ -427,10 +465,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     loadedSessions.clear()
     loadingSessions.clear()
 
-    index.value = {
-      userId: currentUserId,
-      characters: {},
-    }
+    index.value = emptyIndex
 
     await createSession(characterId)
   }
@@ -451,6 +486,64 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     ensureGeneration(sessionId)
     sessionGenerations.value[sessionId] += 1
     return sessionGenerations.value[sessionId]
+  }
+
+  /**
+   * TTS 재생 완료된 텍스트를 assistant 메시지로 session history에 추가한다.
+   * 마지막 메시지가 assistant이면 append, 아니면 새로 push.
+   * playbackManager.onEnd마다 청크별로 호출된다.
+   *
+   * @param sessionId 대상 세션 ID
+   * @param spokenText 재생 완료된 청크 텍스트
+   */
+  function commitSpokenMessage(sessionId: string, spokenText: string) {
+    const text = spokenText.trim()
+      ; (window as any).logChat?.('[DEBUG] commitSpokenMessage sessionId=' + sessionId + ' text=' + text.slice(0, 40))
+    if (!text)
+      return
+    const msgs = sessionMessages.value[sessionId]
+      ; (window as any).logChat?.('[DEBUG] commitSpokenMessage msgs=' + (msgs ? 'array(' + msgs.length + ')' : 'UNDEFINED'))
+    if (!msgs)
+      return
+
+    const lastIdx = msgs.length - 1
+    const last = msgs[lastIdx]
+    if (last?.role === 'assistant') {
+      // 직접 mutation 대신 splice로 새 객체 교체 → Vue reactivity 확실히 트리거
+      const newContent = (last.content as string) + ' ' + text
+      const updated: ChatHistoryItem = {
+        ...last,
+        content: newContent,
+        slices: [{ type: 'text', text: newContent }],
+      }
+      msgs.splice(lastIdx, 1, updated)
+    }
+    else {
+      msgs.push({
+        role: 'assistant',
+        content: text,
+        createdAt: Date.now(),
+        id: nanoid(),
+        slices: [{ type: 'text', text }],
+        tool_results: [],
+      } as ChatHistoryItem)
+    }
+    persistSessionMessages(sessionId)
+  }
+
+  /**
+   * TTS 창(Stage.vue)에서 보낸 sessionSpokenCommitEvent를 수신해
+   * 이 창의 in-memory session을 직접 갱신한다.
+   * DB 재읽기 없이 크로스윈도우 동기화가 가능하다.
+   */
+  function bindSessionBus() {
+    const context = getSessionBusContext()
+    context.on(sessionSpokenCommitEvent, (evt) => {
+      const payload = (evt as { body?: SessionSpokenCommitPayload })?.body
+      if (!payload?.sessionId || !payload?.text)
+        return
+      commitSpokenMessage(payload.sessionId, payload.text)
+    })
   }
 
   function getSessionGenerationValue(sessionId?: string) {
@@ -548,6 +641,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     getSessionMessages,
     getSessionGeneration,
     bumpSessionGeneration,
+    commitSpokenMessage,
     getSessionGenerationValue,
 
     forkSession,

@@ -62,6 +62,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
   const { streamingMessage } = storeToRefs(chatStream)
 
   const sending = ref(false)
+  const currentSendingSessionId = ref('')  // performSend가 실제로 사용하는 sessionId
   const pendingQueuedSends = ref<QueuedSend[]>([])
   const hooks = createChatHooks()
 
@@ -113,6 +114,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
     const sendingCreatedAt = Date.now()
     const streamingMessageContext: ChatStreamEventContext = {
+      sessionId,
       message: { role: 'user', content: sendingMessage, createdAt: sendingCreatedAt, id: nanoid() },
       contexts: chatContext.getContextsSnapshot(),
       composedMessage: [],
@@ -140,7 +142,10 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     trackFirstMessage()
 
     try {
+      currentSendingSessionId.value = sessionId
+        ; (window as any).logChat?.('[DEBUG] performSend try start, sessionId=' + sessionId)
       await hooks.emitBeforeMessageComposedHooks(sendingMessage, streamingMessageContext)
+        ; (window as any).logChat?.('[DEBUG] performSend after BeforeMessageComposed')
 
       const contentParts: CommonContentPart[] = [{ type: 'text', text: sendingMessage }]
 
@@ -171,6 +176,8 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         return
 
       const sessionMessagesForSend = chatSession.getSessionMessages(sessionId)
+        // eslint-disable-next-line no-console
+        ; (window as any).logChat?.('[DEBUG] performSend LLM sessionId=' + sessionId + ' active=' + chatSession.activeSessionId)
       sessionMessagesForSend.push({ role: 'user', content: finalContent, createdAt: sendingCreatedAt, id: nanoid() })
       chatSession.persistSessionMessages(sessionId)
 
@@ -327,11 +334,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
       await parser.end()
 
-      if (!isStaleGeneration() && buildingMessage.slices.length > 0) {
-        sessionMessagesForSend.push(toRaw(buildingMessage))
-        chatSession.persistSessionMessages(sessionId)
-      }
-
       await hooks.emitStreamEndHooks(streamingMessageContext)
       await hooks.emitAssistantResponseEndHooks(fullText, streamingMessageContext)
 
@@ -409,6 +411,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
   return {
     sending,
+    currentSendingSessionId,
 
     discoverToolsCompatibility: llmStore.discoverToolsCompatibility,
 

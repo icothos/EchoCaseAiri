@@ -22,6 +22,9 @@ export function expose() {
       contextBridge.exposeInMainWorld('logLLM', (line: string) =>
         ipcRenderer.invoke('log:llm', line),
       )
+      contextBridge.exposeInMainWorld('logChat', (line: string) =>
+        ipcRenderer.invoke('log:chat', line),
+      )
     }
     catch (error) {
       console.error(error)
@@ -31,6 +34,7 @@ export function expose() {
     window.electron = electronAPI
     window.platform = platform
       ; (window as any).logLLM = (line: string) => ipcRenderer.invoke('log:llm', line)
+      ; (window as any).logChat = (line: string) => ipcRenderer.invoke('log:chat', line)
   }
 }
 

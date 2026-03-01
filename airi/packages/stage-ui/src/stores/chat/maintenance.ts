@@ -18,7 +18,16 @@ export const useChatMaintenanceStore = defineStore('chat-maintenance', () => {
     chatStream.resetStream()
   }
 
+  async function resetAllSessions() {
+    chatContext.resetContexts()
+    chatOrchestrator.cancelPendingSends()
+    chatStream.resetStream()
+    await chatSession.resetAllSessions()
+  }
+
   return {
     cleanupMessages,
+    resetAllSessions,
   }
 })
+
