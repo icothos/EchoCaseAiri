@@ -460,6 +460,35 @@ mountEchoMemory(serverChannelStore, chatOrchestratorStore, chatContextStore, {
 
 ---
 
+## Gemini Utils (EchoCast Integration)
+
+> **로컬 포크 전용** — `packages/gemini-utils`에 위치한 커스텀 공유 패키지.
+
+`@google/genai` SDK 유틸리티를 `echo-memory`와 `stage-ui` 양쪽에서 공유하기 위한 패키지.
+
+### LLM 경로 분기 (`stage-ui/src/stores/llm.ts`)
+
+```typescript
+// Gemini provider 감지 시 native SDK로 분기, 그 외 xsai 경로 유지
+if (isGeminiProvider(chatProvider, model)) {
+  streamGeminiNative(model, apiKey, messages, tools, onEvent, onLog)
+  return
+}
+streamText({ ...chatProvider.chat(model), ... })  // 원본 xsai 경로
+```
+
+### Bouncer / Summarizer (`echo-memory`)
+
+`baseUrl`에 `generativelanguage.googleapis.com`이 포함되면 `callGemini()` (SDK) 사용, 그 외 기존 OpenAI compat fetch 유지.
+
+### 환경 변수
+
+```env
+VITE_GEMINI_API_KEY=your-api-key-here
+```
+
+---
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=moeru-ai/airi&type=Date)](https://www.star-history.com/#moeru-ai/airi&Date)

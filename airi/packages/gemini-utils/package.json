@@ -1,9 +1,9 @@
 {
-    "name": "@proj-airi/echo-memory",
+    "name": "@proj-airi/gemini-utils",
     "type": "module",
     "version": "0.1.0",
     "private": true,
-    "description": "Tri-Core memory system and sLLM Bouncer for Airi",
+    "description": "Shared @google/genai utilities (instance cache, streaming, token counting)",
     "license": "MIT",
     "exports": {
         ".": {
@@ -17,9 +17,7 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@proj-airi/gemini-utils": "workspace:*",
-        "@proj-airi/server-sdk": "workspace:*",
-        "nanoid": "^5.1.5"
+        "@google/genai": "catalog:"
     },
     "devDependencies": {
         "tsdown": "catalog:",

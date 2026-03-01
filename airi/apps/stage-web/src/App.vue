@@ -116,6 +116,7 @@ onMounted(async () => {
       {
         bouncer: {
           baseUrl: bouncerBaseUrl,
+          apiKey: import.meta.env.VITE_BOUNCER_API_KEY || geminiKey || undefined,
           model: import.meta.env.VITE_BOUNCER_MODEL ?? 'local-model',
           timeoutMs: Number(import.meta.env.VITE_BOUNCER_TIMEOUT_MS ?? 5000),
         },
@@ -125,6 +126,7 @@ onMounted(async () => {
           ? {
               summarizerLLM: {
                 baseUrl: summarizerBaseUrl,
+                apiKey: import.meta.env.VITE_SUMMARIZER_API_KEY || geminiKey || undefined,
                 model: summarizerModel ?? 'local-model',
               },
             }
@@ -132,6 +134,7 @@ onMounted(async () => {
             ? {
                 summarizerLLM: {
                   baseUrl: `${geminiBase.replace(/\/$/, '')}/`,
+                  apiKey: geminiKey,
                   model: summarizerModel ?? import.meta.env.VITE_ACTIVE_MODEL ?? 'gemini-2.0-flash-lite',
                 },
               }
@@ -141,6 +144,7 @@ onMounted(async () => {
           ? {
               progressLLM: {
                 baseUrl: progressBaseUrl,
+                apiKey: import.meta.env.VITE_PROGRESS_API_KEY || geminiKey || undefined,
                 model: progressModel ?? 'local-model',
               },
             }
@@ -148,6 +152,7 @@ onMounted(async () => {
             ? {
                 progressLLM: {
                   baseUrl: `${geminiBase.replace(/\/$/, '')}/`,
+                  apiKey: geminiKey,
                   model: progressModel ?? import.meta.env.VITE_ACTIVE_MODEL ?? 'gemini-2.0-flash-lite',
                 },
               }

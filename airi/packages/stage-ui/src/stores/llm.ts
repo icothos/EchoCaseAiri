@@ -8,24 +8,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import { debug, mcp } from '../tools'
-
-// LLM API 콜 로거 (echo-memory 없이도 동작하는 경량 fallback)
-const _llmLog = {
-  request: (info: { baseURL: string, model: string, msgCount: number }) => {
-    // eslint-disable-next-line no-console
-    console.debug(
-      `[LLM→] ${new Date().toISOString().slice(11, 23)} [MAIN] ${info.model} @ ${info.baseURL} | ${info.msgCount} msgs`,
-    )
-    return Date.now()
-  },
-  response: (startedAt: number, text: string, usage?: any) => {
-    const ms = Date.now() - startedAt
-    // eslint-disable-next-line no-console
-    console.debug(
-      `[LLM←] ${new Date().toISOString().slice(11, 23)} [MAIN] ${ms}ms | ${text.length}chars${usage ? ` | tokens: ${JSON.stringify(usage)}` : ''}`,
-    )
-  },
-}
+import { isGeminiProvider, streamGeminiNative } from './gemini-utils'
 
 export type StreamEvent
   = | { type: 'text-delta', text: string }
@@ -39,7 +22,7 @@ export interface StreamOptions {
   onStreamEvent?: (event: StreamEvent) => void | Promise<void>
   toolsCompatibility?: Map<string, boolean>
   supportsTools?: boolean
-  waitForTools?: boolean // when true,won't resolve on finishReason=='tool_calls';
+  waitForTools?: boolean // when true, won't resolve on finishReason=='tool_calls'
   tools?: Tool[] | (() => Promise<Tool[] | undefined>)
 }
 
@@ -114,32 +97,33 @@ async function streamFrom(model: string, chatProvider: ChatProvider, messages: M
     }
 
     try {
-      // ── LLM 요청 로그 ──────────────────────────────────────
-      const _providerConfig = chatProvider.chat(model)
-      const _t0 = _llmLog.request({
-        baseURL: String(_providerConfig.baseURL ?? '(unknown)'),
-        model,
-        msgCount: sanitized.length,
-      })
-      let _fullText = ''
-      // ────────────────────────────────────────────────────────
+      // ── Gemini native SDK 경로 ────────────────────────────────
+      if (isGeminiProvider(chatProvider, model)) {
+        const apiKey = (import.meta.env as any).VITE_GEMINI_API_KEY as string | undefined
+        if (!apiKey) {
+          rejectOnce(new Error('VITE_GEMINI_API_KEY is not set'))
+          return
+        }
+        streamGeminiNative(
+          model,
+          apiKey,
+          sanitized,
+          tools,
+          event => onEvent(event as any),
+          line => { (window as any).logLLM?.(line) },
+        ).catch(rejectOnce)
+        return
+      }
+      // ─────────────────────────────────────────────────────────
 
       streamText({
-        ..._providerConfig,
+        ...chatProvider.chat(model),
         maxSteps: 10,
         messages: sanitized,
         headers,
         // TODO: we need Automatic tools discovery
         tools,
-        onEvent: async (event) => {
-          // ── 응답 토큰 누적 & 완료 로그 ───────────────────────
-          if (event && (event as any).type === 'text-delta')
-            _fullText += (event as any).text ?? ''
-          if (event && (event as any).type === 'finish')
-            _llmLog.response(_t0, _fullText, (event as any).usage)
-          // ─────────────────────────────────────────────────────
-          await onEvent(event)
-        },
+        onEvent,
       })
     }
     catch (err) {

@@ -6,6 +6,8 @@ import type { HotContextPool } from '../memory/hot-pool'
 import type { BouncerOptions, SummarizerOptions, SummarizerResult } from '../types'
 import type { LLMLoggerInstance } from '../logger'
 
+import { callGemini, isGeminiUrl } from '@proj-airi/gemini-utils'
+
 import { getGlobalLLMLogger } from '../logger'
 
 const MIN_SUMMARIZE_CHARS = 30
@@ -34,14 +36,21 @@ export function createSummarizer(
     summarizerOptions?: SummarizerOptions & { logger?: LLMLoggerInstance },
     progressOptions?: BouncerOptions,  // Progress Summarizer 전용 LLM (생략 시 bouncerOptions 공유)
 ) {
-    const { baseUrl, model = 'local-model', timeoutMs = 10000 } = bouncerOptions
+    const { baseUrl, apiKey, model = 'local-model', timeoutMs = 10000 } = bouncerOptions
     // Progress Summarizer는 별도 엔드포인트 가능, 없으면 main summarizer 공유
     const progressBaseUrl = progressOptions?.baseUrl ?? baseUrl
     const progressModel = progressOptions?.model ?? model
+    const progressApiKey = progressOptions?.apiKey ?? apiKey
     const progressTimeoutMs = progressOptions?.timeoutMs ?? 8000
     const logger = summarizerOptions?.logger ?? getGlobalLLMLogger()
     const windowSize = summarizerOptions?.windowSize ?? 20
     const chunkSize = summarizerOptions?.chunkSize ?? 10
+    const authHeaders: Record<string, string> = apiKey
+        ? { 'Authorization': `Bearer ${apiKey}` }
+        : {}
+    const progressAuthHeaders: Record<string, string> = progressApiKey
+        ? { 'Authorization': `Bearer ${progressApiKey}` }
+        : {}
 
     // 슬라이딩 윈도우 메시지 버퍼
     const messageBuffer: ChatMessage[] = []
@@ -49,31 +58,54 @@ export function createSummarizer(
     const pendingChunks: ChatMessage[][] = []
 
     async function callSummarizer(chatLog: string): Promise<SummarizerResult | null> {
-        const url = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`
-        const body = JSON.stringify({
-            model,
-            messages: [
-                { role: 'system', content: SUMMARIZER_SYSTEM_PROMPT },
-                { role: 'user', content: `Chat Log:\n${chatLog}` },
-            ],
-            temperature: 0.3,
-            max_tokens: 256,
-            stream: false,
-        })
-
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), timeoutMs)
         const startedAt = logger.request('SUMMARIZER', chatLog.slice(0, 200), model, chatLog.slice(0, 60))
 
         try {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body,
-                signal: controller.signal,
-            })
-            const json = await res.json() as any
-            let raw = (json?.choices?.[0]?.message?.content ?? '').trim()
+            let raw: string
+
+            // Gemini native SDK 경로
+            if (isGeminiUrl(baseUrl) && apiKey) {
+                raw = await callGemini({
+                    apiKey,
+                    model,
+                    messages: [
+                        { role: 'system', content: SUMMARIZER_SYSTEM_PROMPT },
+                        { role: 'user', content: `Chat Log:\n${chatLog}` },
+                    ],
+                    temperature: 0.3,
+                    maxOutputTokens: 256,
+                    timeoutMs,
+                })
+            }
+            else {
+                // OpenAI compat 경로
+                const url = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`
+                const body = JSON.stringify({
+                    model,
+                    messages: [
+                        { role: 'system', content: SUMMARIZER_SYSTEM_PROMPT },
+                        { role: 'user', content: `Chat Log:\n${chatLog}` },
+                    ],
+                    temperature: 0.3,
+                    max_tokens: 256,
+                    stream: false,
+                })
+                const controller = new AbortController()
+                const timer = setTimeout(() => controller.abort(), timeoutMs)
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...authHeaders },
+                        body,
+                        signal: controller.signal,
+                    })
+                    raw = ((await res.json() as any)?.choices?.[0]?.message?.content ?? '').trim()
+                }
+                finally {
+                    clearTimeout(timer)
+                }
+            }
+
             logger.response('SUMMARIZER', raw, startedAt, model)
             if (raw.startsWith('```json'))
                 raw = raw.slice(7)
@@ -94,9 +126,6 @@ export function createSummarizer(
         catch (err) {
             console.warn('[Summarizer] call failed:', err)
             return null
-        }
-        finally {
-            clearTimeout(timer)
         }
     }
 
@@ -203,28 +232,60 @@ Output: a single Korean sentence (20-40 chars). Example output: "게임 공략 �
             stream: false,
         })
 
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), progressTimeoutMs)
         const startedAt = logger.request('SUMMARIZER', userPrompt.slice(0, 100), progressModel, aiResponse.slice(0, 60))
 
         try {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body,
-                signal: controller.signal,
-            })
-            const json = await res.json() as any
-            const raw = (json?.choices?.[0]?.message?.content ?? '').trim()
+            let raw: string
+
+            // Gemini native SDK 경로
+            if (isGeminiUrl(progressBaseUrl) && progressApiKey) {
+                raw = await callGemini({
+                    apiKey: progressApiKey,
+                    model: progressModel,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt },
+                    ],
+                    temperature: 0.2,
+                    maxOutputTokens: 80,
+                    timeoutMs: progressTimeoutMs,
+                })
+            }
+            else {
+                // OpenAI compat 경로
+                const url = `${progressBaseUrl.replace(/\/$/, '')}/v1/chat/completions`
+                const body = JSON.stringify({
+                    model: progressModel,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt },
+                    ],
+                    temperature: 0.2,
+                    max_tokens: 80,
+                    stream: false,
+                })
+                const controller = new AbortController()
+                const timer = setTimeout(() => controller.abort(), progressTimeoutMs)
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...progressAuthHeaders },
+                        body,
+                        signal: controller.signal,
+                    })
+                    raw = ((await res.json() as any)?.choices?.[0]?.message?.content ?? '').trim()
+                }
+                finally {
+                    clearTimeout(timer)
+                }
+            }
+
             logger.response('SUMMARIZER', raw, startedAt, progressModel)
             return raw || null
         }
         catch (err) {
             console.warn('[ProgressSummarizer] call failed:', err)
             return null
-        }
-        finally {
-            clearTimeout(timer)
         }
     }
 

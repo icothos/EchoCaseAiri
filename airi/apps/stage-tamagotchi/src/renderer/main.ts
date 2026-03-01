@@ -15,7 +15,8 @@ import App from './App.vue'
 
 import { i18n } from './modules/i18n'
 
-import './modules/posthog'
+// import './modules/posthog'  // PostHog 분석 비활성화
+import './dev-seed'
 
 // eslint-disable-next-line perfectionist/sort-imports
 import '@unocss/reset/tailwind.css'

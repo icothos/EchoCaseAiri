@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import VueI18n from '@intlify/unplugin-vue-i18n/vite'
@@ -120,6 +121,21 @@ export default defineConfig({
           if (ctx.mode === 'production') {
             define['import.meta.env.URL_MODE'] = '\'file\''
           }
+
+          // .env.secret 로딩 (VITE_ 프리픽스 변수를 renderer에 주입)
+          try {
+            const secretPath = resolve(join(import.meta.dirname, '.env.secret'))
+            const secret = readFileSync(secretPath, 'utf-8')
+            for (const line of secret.split(/\r?\n/)) {
+              const m = line.trim().match(/^(VITE_[^=]+)=(.*)$/)
+              if (m) {
+                const [, key, val] = m
+                if (val.trim())
+                  define[`import.meta.env.${key}`] = JSON.stringify(val.trim())
+              }
+            }
+          }
+          catch { /* .env.secret 없으면 무시 */ }
 
           return { define }
         },
