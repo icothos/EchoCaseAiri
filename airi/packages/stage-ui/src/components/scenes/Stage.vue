@@ -34,7 +34,7 @@ import { useSpeechStore } from '../../stores/modules/speech'
 import { useProvidersStore } from '../../stores/providers'
 import { useSettings } from '../../stores/settings'
 import { useSpeechRuntimeStore } from '../../stores/speech-runtime'
-import { getSessionBusContext, sessionSpokenCommitEvent } from '../../services/session/bus'
+import { getSessionBusContext, sessionTtsSegmentStartedEvent } from '../../services/session/bus'
 
 withDefaults(defineProps<{
   paused?: boolean
@@ -73,7 +73,6 @@ const currentAudioSource = ref<AudioBufferSourceNode>()
 
 const chatOrchestrator = useChatOrchestratorStore()
 const { onBeforeMessageComposed, onBeforeSend, onTokenLiteral, onTokenSpecial, onStreamEnd, onAssistantResponseEnd } = chatOrchestrator
-const { currentSendingSessionId } = storeToRefs(chatOrchestrator)
 const chatHookCleanups: Array<() => void> = []
 // WORKAROUND: clear previous handlers on unmount to avoid duplicate calls when this component remounts.
 //             We keep per-hook disposers instead of wiping the global chat hooks to play nicely with
@@ -336,19 +335,16 @@ speechPipeline.on('onSpecial', (segment) => {
 })
 
 
+// onStart: TTS 오디오 재생 시작 시점 → text 포함하여 windows:chat에 started 신호 전송 → 텍스트 표시
+playbackManager.onStart(({ item }) => {
+  if (item.text && !item.special && item.sessionId) {
+    sessionBusContext.emit(sessionTtsSegmentStartedEvent, { sessionId: item.sessionId, text: item.text })
+  }
+})
+
 playbackManager.onEnd(({ item }) => {
   if (item.text && !item.special) {
     ;(window as any).logChat?.(`[TTS onEnd] sessionId=${item.sessionId ?? 'none'} text=${item.text.slice(0, 40)}`)
-    if (item.sessionId) {
-      // BroadcastChannel로 LLM 창의 session-store에 시그널 전송
-      // LLM 창이 in-memory session을 직접 갱신하고 DB persist까지 담당
-      sessionBusContext.emit(sessionSpokenCommitEvent, {
-        sessionId: item.sessionId,
-        text: item.text,
-        createdAt: Date.now(),
-      })
-    }
-
     const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
     ;(window as any).logChat?.(`[${ts}] [Airi] ${item.text}`)
   }
@@ -359,11 +355,9 @@ playbackManager.onEnd(({ item }) => {
 
 playbackManager.onInterrupt(({ item, reason }) => {
   if (item.text && !item.special) {
-    // 인터럽트된 청크: 로그만 기록
     const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
     ;(window as any).logChat?.(`[${ts}] [Airi][INTERRUPTED reason=${reason}] ${item.text}`)
   }
-
   nowSpeaking.value = false
   mouthOpenSize.value = 0
 })
@@ -458,10 +452,9 @@ chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
   }
 
   const sessionId = context.sessionId
-  ;(window as any).logChat?.(`[DEBUG] openIntent sessionId="${sessionId}"`)
   currentChatIntent = speechRuntimeStore.openIntent({
     ownerId: activeCardId.value,
-    sessionId,  // context에서 직접 읽어서 멀티윈도우에서도 올바르게 동작
+    sessionId,
     priority: 'normal',
     behavior: 'queue',
   })

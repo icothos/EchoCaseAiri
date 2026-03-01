@@ -2,17 +2,19 @@ import { defineEventa } from '@moeru/eventa'
 import { createContext as createBroadcastChannelContext } from '@moeru/eventa/adapters/broadcast-channel'
 
 /**
- * Stage.vue(TTS 창) → LLM 창 방향의 session commit 시그널.
- * TTS onEnd 시 Stage.vue가 emit하고, session-store가 in-memory session을 직접 갱신한다.
- * DB 재읽기 없이 크로스윈도우 동기화가 가능하다.
+ * Stage.vue(windows:main) → session-store(windows:chat) 방향의 session 동기화 버스.
+ *
+ * [흐름]
+ * 1. playbackManager.onStart 시 Stage.vue → sessionTtsSegmentStartedEvent { sessionId, text } 발송
+ * 2. windows:chat session-store → 수신 → 바로 commitSpokenMessage 호출 (같은 창 ✓)
  */
-export interface SessionSpokenCommitPayload {
+
+export interface SessionTtsSegmentStartedPayload {
     sessionId: string
     text: string
-    createdAt: number
 }
 
-export const sessionSpokenCommitEvent = defineEventa<SessionSpokenCommitPayload>('eventa:session:spoken:commit')
+export const sessionTtsSegmentStartedEvent = defineEventa<SessionTtsSegmentStartedPayload>('eventa:session:tts:segment:started')
 
 const BUS_CHANNEL_NAME = 'proj-airi:session:spoken'
 

@@ -8,7 +8,7 @@ import { computed, ref, watch } from 'vue'
 import { client } from '../../composables/api'
 import { useLocalFirstRequest } from '../../composables/use-local-first'
 import { chatSessionsRepo } from '../../database/repos/chat-sessions.repo'
-import { type SessionSpokenCommitPayload, getSessionBusContext, sessionSpokenCommitEvent } from '../../services/session/bus'
+import { type SessionTtsSegmentStartedPayload, getSessionBusContext, sessionTtsSegmentStartedEvent } from '../../services/session/bus'
 import { useAuthStore } from '../auth'
 import { useAiriCardStore } from '../modules/airi-card'
 
@@ -343,7 +343,6 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     if (initializePromise)
       return initializePromise
     initializing.value = true
-    bindSessionBus()
     initializePromise = (async () => {
       // 개발 환경: VITE_DEV_CLEAR_CHAT=1 이면 세션 로드 전에 DB 먼저 초기화
       if (import.meta.env.DEV && import.meta.env.VITE_DEV_CLEAR_CHAT === '1') {
@@ -489,6 +488,49 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   }
 
   /**
+   * sessionMessages.value[sessionId]를 직접 읽어 메시지를 append한다.
+   * getSessionMessages()가 반환하는 로컈 배열 참조(로드세션 교체 전)에 push하는 문제를 피한다.
+   */
+  function appendSessionMessage(sessionId: string, message: ChatHistoryItem) {
+    let msgs = sessionMessages.value[sessionId]
+    if (!msgs) {
+      // 세션이 아직 초기화되지 않은 경우 ensureSession 후 재시도
+      ensureSession(sessionId)
+      msgs = sessionMessages.value[sessionId]
+    }
+    if (!msgs) {
+      return
+    }
+    msgs.push(message)
+    persistSessionMessages(sessionId)
+  }
+
+  /**
+   * windows:chat 전용. TTS started 이벤트를 수신하여 commitSpokenMessage를 호출한다.
+   * chat.vue 페이지 onMounted에서 명시적으로 1회만 호출해야 한다.
+   * main window에서는 호출하지 말 것 (중복 commit 방지).
+   */
+  let sessionBusBound = false
+  function bindSessionBus() {
+    if (sessionBusBound)
+      return
+    sessionBusBound = true
+
+    const busContext = getSessionBusContext()
+
+    // TTS 재생 시작 시점에 text와 함께 started 이벤트를 수신 → 바로 commitSpokenMessage 호출
+    busContext.on(sessionTtsSegmentStartedEvent, (evt) => {
+      const payload = (evt as { body?: SessionTtsSegmentStartedPayload })?.body
+      if (!payload?.sessionId || !payload?.text)
+        return
+      const text = payload.text.trim()
+      if (!text)
+        return
+      commitSpokenMessage(payload.sessionId, text)
+    })
+  }
+
+  /**
    * TTS 재생 완료된 텍스트를 assistant 메시지로 session history에 추가한다.
    * 마지막 메시지가 assistant이면 append, 아니면 새로 push.
    * playbackManager.onEnd마다 청크별로 호출된다.
@@ -498,11 +540,9 @@ export const useChatSessionStore = defineStore('chat-session', () => {
    */
   function commitSpokenMessage(sessionId: string, spokenText: string) {
     const text = spokenText.trim()
-      ; (window as any).logChat?.('[DEBUG] commitSpokenMessage sessionId=' + sessionId + ' text=' + text.slice(0, 40))
     if (!text)
       return
     const msgs = sessionMessages.value[sessionId]
-      ; (window as any).logChat?.('[DEBUG] commitSpokenMessage msgs=' + (msgs ? 'array(' + msgs.length + ')' : 'UNDEFINED'))
     if (!msgs)
       return
 
@@ -529,21 +569,6 @@ export const useChatSessionStore = defineStore('chat-session', () => {
       } as ChatHistoryItem)
     }
     persistSessionMessages(sessionId)
-  }
-
-  /**
-   * TTS 창(Stage.vue)에서 보낸 sessionSpokenCommitEvent를 수신해
-   * 이 창의 in-memory session을 직접 갱신한다.
-   * DB 재읽기 없이 크로스윈도우 동기화가 가능하다.
-   */
-  function bindSessionBus() {
-    const context = getSessionBusContext()
-    context.on(sessionSpokenCommitEvent, (evt) => {
-      const payload = (evt as { body?: SessionSpokenCommitPayload })?.body
-      if (!payload?.sessionId || !payload?.text)
-        return
-      commitSpokenMessage(payload.sessionId, payload.text)
-    })
   }
 
   function getSessionGenerationValue(sessionId?: string) {
@@ -641,7 +666,9 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     getSessionMessages,
     getSessionGeneration,
     bumpSessionGeneration,
+    bindSessionBus,
     commitSpokenMessage,
+    appendSessionMessage,
     getSessionGenerationValue,
 
     forkSession,

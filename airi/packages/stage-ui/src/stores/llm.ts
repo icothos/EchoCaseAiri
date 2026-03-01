@@ -205,6 +205,34 @@ export async function attemptForToolsCompatibilityDiscovery(model: string, chatP
 export const useLLM = defineStore('llm', () => {
   const toolsCompatibility = ref<Map<string, boolean>>(new Map())
 
+  /**
+   * sessionId → TTS 변환 완료됐지만 아직 발화되지 않은 LLM 원본 텍스트 세그먼트 큐.
+   * Stage.vue onTtsResult 시점에 enqueueLlmSegment로 적재되고,
+   * TTS 발화 완료(sessionTtsSegmentPlayedEvent) 시 dequeueLlmSegment로 순서대로 꺼낸다.
+   */
+  const pendingLlmSegments = new Map<string, string[]>()
+
+  /** TTS 요청 시점(문장 확정 후, TTS 생성 전)에 세그먼트를 큐에 적재 (Stage.vue onTtsRequest에서 호출) */
+  function enqueueLlmSegment(sessionId: string, text: string) {
+    const trimmed = text.trim()
+    if (!trimmed)
+      return
+    const q = pendingLlmSegments.get(sessionId) ?? []
+    q.push(trimmed)
+    pendingLlmSegments.set(sessionId, q)
+  }
+
+  /** TTS 발화 완료 시점에 순서대로 세그먼트 꺼내기 (session-store bindSessionBus에서 호출) */
+  function dequeueLlmSegment(sessionId: string): string | undefined {
+    const text = pendingLlmSegments.get(sessionId)?.shift()
+    return text
+  }
+
+  /** 인터럽트 등으로 해당 세션 큐 전체 초기화 */
+  function clearLlmSegments(sessionId: string) {
+    pendingLlmSegments.delete(sessionId)
+  }
+
   async function discoverToolsCompatibility(model: string, chatProvider: ChatProvider, _: Message[], options?: Omit<StreamOptions, 'supportsTools'>) {
     // Cached, no need to discover again
     if (toolsCompatibility.value.has(`${chatProvider.chat(model).baseURL}-${model}`)) {
@@ -243,5 +271,8 @@ export const useLLM = defineStore('llm', () => {
     models,
     stream,
     discoverToolsCompatibility,
+    enqueueLlmSegment,
+    dequeueLlmSegment,
+    clearLlmSegments,
   }
 })

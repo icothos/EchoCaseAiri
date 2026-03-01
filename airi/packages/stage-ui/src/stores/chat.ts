@@ -143,9 +143,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
     try {
       currentSendingSessionId.value = sessionId
-        ; (window as any).logChat?.('[DEBUG] performSend try start, sessionId=' + sessionId)
       await hooks.emitBeforeMessageComposedHooks(sendingMessage, streamingMessageContext)
-        ; (window as any).logChat?.('[DEBUG] performSend after BeforeMessageComposed')
 
       const contentParts: CommonContentPart[] = [{ type: 'text', text: sendingMessage }]
 
@@ -175,11 +173,11 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       if (shouldAbort())
         return
 
+      // sessionMessages.value[sessionId]를 직접 뮤테이션 (캐시된 참조가 stale해지는 문제 방지)
+      chatSession.appendSessionMessage(sessionId, { role: 'user', content: finalContent, createdAt: sendingCreatedAt, id: nanoid() })
+
+      // LLM 호출용 메시지는 append 이후 최신 배열을 다시 읽음
       const sessionMessagesForSend = chatSession.getSessionMessages(sessionId)
-        // eslint-disable-next-line no-console
-        ; (window as any).logChat?.('[DEBUG] performSend LLM sessionId=' + sessionId + ' active=' + chatSession.activeSessionId)
-      sessionMessagesForSend.push({ role: 'user', content: finalContent, createdAt: sendingCreatedAt, id: nanoid() })
-      chatSession.persistSessionMessages(sessionId)
 
       const categorizer = createStreamingCategorizer(activeProvider.value)
       let streamPosition = 0
@@ -344,6 +342,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         outputText: fullText,
         toolCalls: sessionMessagesForSend.filter(msg => msg.role === 'tool') as ToolMessage[],
       }, streamingMessageContext)
+
 
       if (isForegroundSession()) {
         streamingMessage.value = { role: 'assistant', content: '', slices: [], tool_results: [] }
