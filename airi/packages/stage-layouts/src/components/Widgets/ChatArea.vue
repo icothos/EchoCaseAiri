@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ChatProvider } from '@xsai-ext/providers/utils'
+import type { Message } from '@xsai/shared-chat'
 
 import { isStageTamagotchi } from '@proj-airi/stage-shared'
 import { useAudioAnalyzer } from '@proj-airi/stage-ui/composables'
@@ -119,6 +120,10 @@ async function handleSend() {
     })
   }
   catch (error) {
+    if ((error as Error).message === 'BOUNCER_IGNORE') {
+      return
+    }
+    
     messageInput.value = textToSend
     messages.value.pop()
     messages.value.push({
@@ -136,7 +141,7 @@ watch(hearingTooltipOpen, async (value) => {
 
 watch([activeProvider, activeModel], async () => {
   if (activeProvider.value && activeModel.value) {
-    await discoverToolsCompatibility(activeModel.value, await providersStore.getProviderInstance<ChatProvider>(activeProvider.value), [])
+    await discoverToolsCompatibility(activeModel.value, await providersStore.getProviderInstance<ChatProvider>(activeProvider.value), [] as Message[], { force: false })
   }
 })
 

@@ -60,8 +60,10 @@ export interface EchoMemoryOptions {
 
 /** 공통 LLM 엔드포인트 설정 (Bouncer/Summarizer 둘 다 사용) */
 export interface LLMEndpointOptions {
-    /** HTTP 서버 base URL (예: http://localhost:8080, https://api.openai.com) */
+    /** HTTP 서버 base URL (예: http://localhost:8080, https://generativelanguage.googleapis.com/v1beta/openai) */
     baseUrl: string
+    /** API 키 (로컬 llama.cpp는 불필요, Gemini 등 클라우드 LLM은 필수) */
+    apiKey?: string
     /** 모델 이름 (기본: 'local-model') */
     model?: string
     /** 요청 타임아웃 ms (기본: Bouncer 5000, Summarizer 10000) */

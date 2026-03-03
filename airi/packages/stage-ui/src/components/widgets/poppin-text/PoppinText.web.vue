@@ -28,7 +28,16 @@ watch(() => props.text, async (text) => {
   if (!text)
     return
   if (typeof text === 'string') {
-    targets.value = [...segmenter.segment(text)].map(seg => seg.segment)
+    const newSegments = [...segmenter.segment(text)].map(seg => seg.segment)
+    if (targets.value.length > 0 && newSegments.length > targets.value.length) {
+      const isAppend = newSegments.slice(0, targets.value.length).every((v, i) => v === targets.value[i])
+      if (isAppend) {
+        targets.value = newSegments
+        return
+      }
+    }
+    lastAnimatedIndex.value = 0
+    targets.value = newSegments
   }
   else {
     abortController.value?.abort()
@@ -62,8 +71,14 @@ const lastAnimatedIndex = ref(-1)
 
 watch([targets, () => props.animator], ([targets, animator]) => {
   if (typeof props.text === 'string') {
-    animatorCleanupFn.value?.()
-    animatorCleanupFn.value = animator?.(elements.value)
+    if (lastAnimatedIndex.value > 0 && lastAnimatedIndex.value < targets.length) {
+      animator?.(elements.value.slice(lastAnimatedIndex.value, targets.length))
+      lastAnimatedIndex.value = targets.length
+    } else if (targets.length > 0) {
+      animatorCleanupFn.value?.()
+      animatorCleanupFn.value = animator?.(elements.value)
+      lastAnimatedIndex.value = targets.length
+    }
   }
   else {
     animator?.(elements.value.slice(lastAnimatedIndex.value, targets.length))

@@ -8,6 +8,8 @@ import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/charac
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { usePluginHostInspectorStore } from '@proj-airi/stage-ui/stores/devtools/plugin-host-debug'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
+import { useChatContextStore } from '@proj-airi/stage-ui/stores/chat/context-store'
+import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/context-bridge'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
@@ -15,6 +17,8 @@ import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
 import { listProvidersForPluginHost, shouldPublishPluginHostCapabilities } from '@proj-airi/stage-ui/stores/plugin-host-capabilities'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
+import { mountEchoMemory } from '@proj-airi/echo-memory'
+import type { EchoMemoryInstance } from '@proj-airi/echo-memory'
 import { useTheme } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { onMounted, onUnmounted, watch } from 'vue'
@@ -53,10 +57,14 @@ const route = useRoute()
 const cardStore = useAiriCardStore()
 const chatSessionStore = useChatSessionStore()
 const serverChannelStore = useModsServerChannelStore()
+const chatOrchestratorStore = useChatOrchestratorStore()
+const chatContextStore = useChatContextStore()
 const characterOrchestratorStore = useCharacterOrchestratorStore()
 const analyticsStore = useSharedAnalyticsStore()
 const pluginHostInspectorStore = usePluginHostInspectorStore()
 usePerfTracerBridgeStore()
+
+let echoMemory: EchoMemoryInstance | null = null
 
 watch(language, () => {
   i18n.locale.value = language.value
@@ -102,6 +110,83 @@ onMounted(async () => {
   await contextBridgeStore.initialize()
   characterOrchestratorStore.initialize()
 
+  // ── echo-memory 마운트 ─────────────────────────────────────────────
+  console.log('[App.vue] .env dump:', {
+    bouncerBase: import.meta.env.VITE_BOUNCER_BASE_URL,
+    geminiKey: import.meta.env.VITE_GEMINI_API_KEY ? 'EXISTS' : 'MISSING'
+  })
+  
+  // .env.local에서 설정 읽기. VITE_BOUNCER_BASE_URL 없으면 echo-memory 비활성화
+  const bouncerBaseUrl = import.meta.env.VITE_BOUNCER_BASE_URL
+  if (bouncerBaseUrl) {
+    const geminiBase = import.meta.env.VITE_GEMINI_BASE_URL
+      ?? 'https://generativelanguage.googleapis.com/v1beta/openai/'
+    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY
+
+    // Summarizer용 LLM (미설정 시 Bouncer 공유)
+    const summarizerBaseUrl = import.meta.env.VITE_SUMMARIZER_BASE_URL
+    const summarizerModel = import.meta.env.VITE_SUMMARIZER_MODEL
+    const summarizerHasGemini = !summarizerBaseUrl && geminiKey
+
+    // Progress Summarizer용 LLM (미설정 시 Summarizer → Bouncer 폴백)
+    const progressBaseUrl = import.meta.env.VITE_PROGRESS_BASE_URL
+    const progressModel = import.meta.env.VITE_PROGRESS_MODEL
+    const progressHasGemini = !progressBaseUrl && geminiKey
+
+    echoMemory = mountEchoMemory(
+      serverChannelStore,
+      chatOrchestratorStore,
+      chatContextStore,
+      {
+        bouncer: {
+          baseUrl: bouncerBaseUrl,
+          apiKey: import.meta.env.VITE_BOUNCER_API_KEY || geminiKey || undefined,
+          model: import.meta.env.VITE_BOUNCER_MODEL ?? 'local-model',
+          timeoutMs: Number(import.meta.env.VITE_BOUNCER_TIMEOUT_MS ?? 5000),
+        },
+        ...(summarizerBaseUrl
+          ? {
+              summarizerLLM: {
+                baseUrl: summarizerBaseUrl,
+                apiKey: import.meta.env.VITE_SUMMARIZER_API_KEY || geminiKey || undefined,
+                model: summarizerModel ?? 'local-model',
+              },
+            }
+          : summarizerHasGemini
+            ? {
+                summarizerLLM: {
+                  baseUrl: `${geminiBase.replace(/\/$/, '')}/`,
+                  apiKey: geminiKey,
+                  model: summarizerModel ?? import.meta.env.VITE_ACTIVE_MODEL ?? 'gemini-2.0-flash-lite',
+                },
+              }
+            : {}),
+        ...(progressBaseUrl
+          ? {
+              progressLLM: {
+                baseUrl: progressBaseUrl,
+                apiKey: import.meta.env.VITE_PROGRESS_API_KEY || geminiKey || undefined,
+                model: progressModel ?? 'local-model',
+              },
+            }
+          : progressHasGemini
+            ? {
+                progressLLM: {
+                  baseUrl: `${geminiBase.replace(/\/$/, '')}/`,
+                  apiKey: geminiKey,
+                  model: progressModel ?? import.meta.env.VITE_ACTIVE_MODEL ?? 'gemini-2.0-flash-lite',
+                },
+              }
+            : {}),
+      },
+    )
+    console.debug('[echo-memory] mounted (tamagotchi)', echoMemory)
+  }
+  else {
+    console.debug('[echo-memory] 비활성화 (VITE_BOUNCER_BASE_URL 미설정)')
+  }
+  // ────────────────────────────────────────────────────────────────────
+
   const startTrackingCursorPoint = useElectronEventaInvoke(electronStartTrackMousePosition)
   const reportPluginCapability = useElectronEventaInvoke(electronPluginUpdateCapability)
   await startTrackingCursorPoint()
@@ -131,7 +216,10 @@ watch(themeColorsHueDynamic, () => {
   document.documentElement.classList.toggle('dynamic-hue', themeColorsHueDynamic.value)
 }, { immediate: true })
 
-onUnmounted(() => contextBridgeStore.dispose())
+onUnmounted(() => {
+  echoMemory?.dispose()
+  contextBridgeStore.dispose()
+})
 </script>
 
 <template>

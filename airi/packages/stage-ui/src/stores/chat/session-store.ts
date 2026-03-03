@@ -8,8 +8,13 @@ import { computed, ref, watch } from 'vue'
 import { client } from '../../composables/api'
 import { useLocalFirstRequest } from '../../composables/use-local-first'
 import { chatSessionsRepo } from '../../database/repos/chat-sessions.repo'
+import { type SessionTtsSegmentStartedPayload, getSessionBusContext, sessionTtsSegmentStartedEvent } from '../../services/session/bus'
 import { useAuthStore } from '../auth'
 import { useAiriCardStore } from '../modules/airi-card'
+export interface PromptOptions {
+  enableCodeBlockOptions?: boolean
+  enableMathSyntax?: boolean
+}
 
 export const useChatSessionStore = defineStore('chat-session', () => {
   const { userId, isAuthenticated } = storeToRefs(useAuthStore())
@@ -117,8 +122,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
           | { type: 'user', userId: string }
           | { type: 'character', characterId: string }
         > = [
-          { type: 'user', userId: userId.value },
-        ]
+            { type: 'user', userId: userId.value },
+          ]
 
         if (cachedRecord.meta.characterId && cachedRecord.meta.characterId !== 'default') {
           members.push({
@@ -172,8 +177,11 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     })
   }
 
-  function generateInitialMessageFromPrompt(prompt: string) {
-    const content = codeBlockSystemPrompt + mathSyntaxSystemPrompt + prompt
+  function generateInitialMessageFromPrompt(prompt: string, options?: PromptOptions) {
+    let content = ''
+    if (options?.enableCodeBlockOptions) content += codeBlockSystemPrompt
+    if (options?.enableMathSyntax) content += mathSyntaxSystemPrompt
+    content += prompt
 
     return {
       role: 'system',
@@ -183,8 +191,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     } satisfies ChatHistoryItem
   }
 
-  function generateInitialMessage() {
-    return generateInitialMessageFromPrompt(systemPrompt.value)
+  function getPromptNode(options?: PromptOptions): ChatHistoryItem {
+    return generateInitialMessageFromPrompt(systemPrompt.value, options)
   }
 
   function ensureGeneration(sessionId: string) {
@@ -284,7 +292,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
       updatedAt: now,
     }
 
-    const initialMessages = options?.messages?.length ? options.messages : [generateInitialMessage()]
+    const initialMessages = options?.messages?.length ? options.messages : []
 
     sessionMetas.value[sessionId] = meta
     sessionMessages.value[sessionId] = initialMessages
@@ -343,6 +351,24 @@ export const useChatSessionStore = defineStore('chat-session', () => {
       return initializePromise
     initializing.value = true
     initializePromise = (async () => {
+      // 개발 환경: VITE_DEV_CLEAR_CHAT=1 이면 세션 로드 전에 DB 먼저 초기화
+      if (import.meta.env.DEV && import.meta.env.VITE_DEV_CLEAR_CHAT === '1') {
+        const currentUserId = getCurrentUserId()
+        // DB에서 index 강제 로드해서 모든 sessionId 수집 후 삭제
+        const existingIndex = await chatSessionsRepo.getIndex(currentUserId)
+        if (existingIndex) {
+          for (const character of Object.values(existingIndex.characters)) {
+            for (const sessionId of Object.keys(character.sessions))
+              await chatSessionsRepo.deleteSession(sessionId)
+          }
+        }
+        // 빈 index 저장
+        await chatSessionsRepo.saveIndex({ userId: currentUserId, characters: {} })
+        index.value = { userId: currentUserId, characters: {} }
+        // eslint-disable-next-line no-console
+        console.debug('[session-store] VITE_DEV_CLEAR_CHAT: chat DB cleared')
+      }
+
       await ensureActiveSessionForCharacter()
       ready.value = true
     })()
@@ -356,10 +382,11 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     }
   }
 
+
   function ensureSession(sessionId: string) {
     ensureGeneration(sessionId)
-    if (!sessionMessages.value[sessionId] || sessionMessages.value[sessionId].length === 0) {
-      sessionMessages.value[sessionId] = [generateInitialMessage()]
+    if (!sessionMessages.value[sessionId]) {
+      sessionMessages.value[sessionId] = []
       void persistSession(sessionId)
     }
   }
@@ -399,7 +426,9 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   function cleanupMessages(sessionId = activeSessionId.value) {
     ensureGeneration(sessionId)
     sessionGenerations.value[sessionId] += 1
-    setSessionMessages(sessionId, [generateInitialMessage()])
+    setSessionMessages(sessionId, [])
+    // 다음 loadSession 호출 시 DB에서 다시 읽도록 캐시 제거
+    loadedSessions.delete(sessionId)
   }
 
   function getAllSessions() {
@@ -411,15 +440,30 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     const characterId = getCurrentCharacterId()
     const sessionIds = new Set<string>()
 
-    if (index.value?.userId === currentUserId) {
+    // index가 아직 로드되지 않았거나 userId가 다르면 DB에서 강제 로드
+    if (!index.value || index.value.userId !== currentUserId)
+      await loadIndexForUser(currentUserId)
+
+    if (index.value) {
       for (const character of Object.values(index.value.characters)) {
         for (const sessionId of Object.keys(character.sessions))
           sessionIds.add(sessionId)
       }
     }
 
+    // 현재 메모리에 있는 세션도 모두 포함
+    for (const sessionId of Object.keys(sessionMessages.value))
+      sessionIds.add(sessionId)
+    for (const sessionId of Object.keys(sessionMetas.value))
+      sessionIds.add(sessionId)
+
+    // 모든 세션 DB에서 삭제
     for (const sessionId of sessionIds)
       await enqueuePersist(() => chatSessionsRepo.deleteSession(sessionId))
+
+    // 빈 index를 DB에 명시적으로 저장
+    const emptyIndex = { userId: currentUserId, characters: {} }
+    await enqueuePersist(() => chatSessionsRepo.saveIndex(emptyIndex))
 
     sessionMessages.value = {}
     sessionMetas.value = {}
@@ -427,10 +471,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     loadedSessions.clear()
     loadingSessions.clear()
 
-    index.value = {
-      userId: currentUserId,
-      characters: {},
-    }
+    index.value = emptyIndex
 
     await createSession(characterId)
   }
@@ -451,6 +492,90 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     ensureGeneration(sessionId)
     sessionGenerations.value[sessionId] += 1
     return sessionGenerations.value[sessionId]
+  }
+
+  /**
+   * sessionMessages.value[sessionId]를 직접 읽어 메시지를 append한다.
+   * getSessionMessages()가 반환하는 로컈 배열 참조(로드세션 교체 전)에 push하는 문제를 피한다.
+   */
+  function appendSessionMessage(sessionId: string, message: ChatHistoryItem) {
+    let msgs = sessionMessages.value[sessionId]
+    if (!msgs) {
+      // 세션이 아직 초기화되지 않은 경우 ensureSession 후 재시도
+      ensureSession(sessionId)
+      msgs = sessionMessages.value[sessionId]
+    }
+    if (!msgs) {
+      return
+    }
+    msgs.push(message)
+    persistSessionMessages(sessionId)
+  }
+
+  /**
+   * windows:chat 전용. TTS started 이벤트를 수신하여 commitSpokenMessage를 호출한다.
+   * chat.vue 페이지 onMounted에서 명시적으로 1회만 호출해야 한다.
+   * main window에서는 호출하지 말 것 (중복 commit 방지).
+   */
+  let sessionBusBound = false
+  function bindSessionBus() {
+    if (sessionBusBound)
+      return
+    sessionBusBound = true
+
+    const busContext = getSessionBusContext()
+
+    // TTS 재생 시작 시점에 text와 함께 started 이벤트를 수신 → 바로 commitSpokenMessage 호출
+    busContext.on(sessionTtsSegmentStartedEvent, (evt) => {
+      const payload = (evt as { body?: SessionTtsSegmentStartedPayload })?.body
+      if (!payload?.sessionId || !payload?.text)
+        return
+      const text = payload.text.trim()
+      if (!text)
+        return
+      commitSpokenMessage(payload.sessionId, text)
+    })
+  }
+
+  /**
+   * TTS 재생 완료된 텍스트를 assistant 메시지로 session history에 추가한다.
+   * 마지막 메시지가 assistant이면 append, 아니면 새로 push.
+   * playbackManager.onEnd마다 청크별로 호출된다.
+   *
+   * @param sessionId 대상 세션 ID
+   * @param spokenText 재생 완료된 청크 텍스트
+   */
+  function commitSpokenMessage(sessionId: string, spokenText: string) {
+    const text = spokenText.trim()
+    if (!text)
+      return
+    const msgs = sessionMessages.value[sessionId]
+    if (!msgs)
+      return
+
+    const lastIdx = msgs.length - 1
+    const last = msgs[lastIdx]
+    if (last?.role === 'assistant') {
+      // 직접 mutation 대신 splice로 새 객체 교체 → Vue reactivity 확실히 트리거
+      const newContent = (last.content as string) + ' ' + text
+      const updated: ChatHistoryItem = {
+        ...last,
+        content: newContent,
+        slices: [{ type: 'text', text: newContent }],
+      }
+      msgs.splice(lastIdx, 1, updated)
+    }
+    else {
+      msgs.push({
+        role: 'assistant',
+        content: text,
+        createdAt: Date.now(),
+        id: nanoid(),
+        slices: [{ type: 'text', text }],
+        tool_results: [],
+      } as ChatHistoryItem)
+    }
+    persistSessionMessages(sessionId)
   }
 
   function getSessionGenerationValue(sessionId?: string) {
@@ -541,6 +666,7 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     cleanupMessages,
     getAllSessions,
     resetAllSessions,
+    getPromptNode,
 
     ensureSession,
     setSessionMessages,
@@ -548,6 +674,9 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     getSessionMessages,
     getSessionGeneration,
     bumpSessionGeneration,
+    bindSessionBus,
+    commitSpokenMessage,
+    appendSessionMessage,
     getSessionGenerationValue,
 
     forkSession,

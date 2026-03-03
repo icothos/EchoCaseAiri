@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { ChatHistoryItem } from '@proj-airi/stage-ui/types/chat'
 import type { ChatProvider } from '@xsai-ext/providers/utils'
+import type { Message } from '@xsai/shared-chat'
 
 import { ChatHistory } from '@proj-airi/stage-ui/components'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatMaintenanceStore } from '@proj-airi/stage-ui/stores/chat/maintenance'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
-import { useChatStreamStore } from '@proj-airi/stage-ui/stores/chat/stream-store'
+import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { BasicTextarea } from '@proj-airi/ui'
@@ -21,11 +22,10 @@ const attachments = ref<{ type: 'image', data: string, mimeType: string, url: st
 
 const chatOrchestrator = useChatOrchestratorStore()
 const chatSession = useChatSessionStore()
-const chatStream = useChatStreamStore()
+const serverChannelStore = useModsServerChannelStore()
 const { cleanupMessages } = useChatMaintenanceStore()
 const { ingest, onAfterMessageComposed, discoverToolsCompatibility } = chatOrchestrator
 const { messages } = storeToRefs(chatSession)
-const { streamingMessage } = storeToRefs(chatStream)
 const { sending } = storeToRefs(chatOrchestrator)
 const { t } = useI18n()
 const providersStore = useProvidersStore()
@@ -50,6 +50,10 @@ async function handleSend() {
 
   try {
     const providerConfig = providersStore.getProviderConfig(activeProvider.value)
+    
+    // Broadcast text to server channel so echo-memory Bouncer can intercept it
+    serverChannelStore.send('input:text', { text: textToSend })
+
     await ingest(textToSend, {
       model: activeModel.value,
       chatProvider: await providersStore.getProviderInstance<ChatProvider>(activeProvider.value),
@@ -61,6 +65,11 @@ async function handleSend() {
     attachmentsToSend.forEach(att => URL.revokeObjectURL(att.url))
   }
   catch (error) {
+    if ((error as Error).message === 'BOUNCER_IGNORE') {
+      // Intentional block by the Bouncer, silent drop
+      return
+    }
+
     // restore on failure
     messageInput.value = textToSend
     attachments.value = attachmentsToSend.map(att => ({
@@ -105,7 +114,7 @@ function removeAttachment(index: number) {
 
 watch([activeProvider, activeModel], async () => {
   if (activeProvider.value && activeModel.value) {
-    await discoverToolsCompatibility(activeModel.value, await providersStore.getProviderInstance<ChatProvider>(activeProvider.value), [])
+    await discoverToolsCompatibility(activeModel.value, await providersStore.getProviderInstance<ChatProvider>(activeProvider.value), [] as Message[], { force: false })
   }
 }, { immediate: true })
 
@@ -124,7 +133,6 @@ const historyMessages = computed(() => messages.value as unknown as ChatHistoryI
       <ChatHistory
         :messages="historyMessages"
         :sending="sending"
-        :streaming-message="streamingMessage"
       />
     </div>
     <div v-if="attachments.length > 0" class="flex flex-wrap gap-2 border-t border-primary-100 p-2">

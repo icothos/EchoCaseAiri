@@ -89,14 +89,63 @@ if (import.meta.env.DEV) {
         }
     }
 
-    // ── 4. Onboarding skip (설정 다이얼로그 표시 안 함) ────────────────
+    // ── 4. TTS(Speech) 프로바이더 / 모델 설정 ──────────────────────────
+    if (import.meta.env.VITE_TTS_PROVIDER)
+        setIfEmpty('settings/speech/active-provider', import.meta.env.VITE_TTS_PROVIDER)
+
+    if (import.meta.env.VITE_TTS_MODEL)
+        setIfEmpty('settings/speech/active-model', import.meta.env.VITE_TTS_MODEL)
+
+    // TTS 프로바이더도 "added" 목록에 등록해 UI에 보이도록 처리
+    if (import.meta.env.VITE_TTS_PROVIDER) {
+        const ADDED_KEY = 'settings/providers/added'
+        let added: Record<string, boolean> = {}
+        try {
+            added = JSON.parse(localStorage.getItem(ADDED_KEY) ?? '{}')
+        }
+        catch { added = {} }
+
+        const ttsId = import.meta.env.VITE_TTS_PROVIDER
+        if (force || !added[ttsId]) {
+            added[ttsId] = true
+            localStorage.setItem(ADDED_KEY, JSON.stringify(added))
+        }
+    }
+
+    // TTS provider baseUrl / voice → credentials + speech/voice에 주입
+    if (import.meta.env.VITE_TTS_BASE_URL || import.meta.env.VITE_TTS_VOICE) {
+        const ttsId = import.meta.env.VITE_TTS_PROVIDER
+        if (ttsId) {
+            // provider credentials에 baseUrl 주입
+            if (import.meta.env.VITE_TTS_BASE_URL) {
+                const CREDS_KEY = 'settings/credentials/providers'
+                let creds: Record<string, Record<string, unknown>> = {}
+                try { creds = JSON.parse(localStorage.getItem(CREDS_KEY) ?? '{}') }
+                catch { creds = {} }
+                if (force || !creds[ttsId]?.baseUrl) {
+                    creds[ttsId] = {
+                        ...(creds[ttsId] ?? {}),
+                        baseUrl: import.meta.env.VITE_TTS_BASE_URL,
+                    }
+                    localStorage.setItem(CREDS_KEY, JSON.stringify(creds))
+                }
+            }
+            // voice ID 주입
+            if (import.meta.env.VITE_TTS_VOICE)
+                setIfEmpty('settings/speech/voice', import.meta.env.VITE_TTS_VOICE)
+        }
+    }
+
+    // ── 5. Onboarding skip (설정 다이얼로그 표시 안 함) ────────────────
     if (force || !localStorage.getItem('onboarding/skipped')) {
         localStorage.setItem('onboarding/skipped', 'true')
         // eslint-disable-next-line no-console
         console.debug('[dev-seed] onboarding/skipped = true')
     }
 
-    // ── 5. 채팅 기록 초기화 (VITE_DEV_CLEAR_CHAT=1 시에만) ────────────
+    // ── 6. 채팅 기록 초기화 (VITE_DEV_CLEAR_CHAT=1 시에만) ────────────
+    // ✅ IndexedDB 초기화는 session-store.initialize()에서 처리됨
+    //    (dev-seed에서 직접 IndexedDB를 건드리면 race condition 발생)
     if (import.meta.env.VITE_DEV_CLEAR_CHAT === '1') {
         // localStorage chat/message/session 키 제거
         const chatKeys = Object.keys(localStorage).filter(k =>
@@ -106,34 +155,8 @@ if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         if (chatKeys.length > 0)
             console.debug(`[dev-seed] cleared localStorage keys:`, chatKeys)
-
-        // airi-local IndexedDB에서 chat/* 키 직접 삭제
-        // storage.ts: indexedDbDriver({ base: 'airi-local' })
-        // chat-sessions.repo.ts 키: local:chat/sessions/*, local:chat/index/*
-        const req = indexedDB.open('airi-local')
-        req.onsuccess = (e) => {
-            const db = (e.target as IDBOpenDBRequest).result
-            const storeNames = Array.from(db.objectStoreNames)
-            const tx = db.transaction(storeNames, 'readwrite')
-            for (const storeName of storeNames) {
-                const store = tx.objectStore(storeName)
-                const cursorReq = store.openCursor()
-                cursorReq.onsuccess = (ev) => {
-                    const cursor = (ev.target as IDBRequest<IDBCursorWithValue>).result
-                    if (!cursor)
-                        return
-                    const key = String(cursor.key)
-                    if (key.includes('chat/')) {
-                        cursor.delete()
-                        // eslint-disable-next-line no-console
-                        console.debug(`[dev-seed] deleted IndexedDB key: ${key}`)
-                    }
-                    cursor.continue()
-                }
-            }
-            tx.oncomplete = () => db.close()
-        }
     }
+
 
     // eslint-disable-next-line no-console
     console.debug('[dev-seed] Done. VITE_DEV_FORCE=1 to override existing settings.')

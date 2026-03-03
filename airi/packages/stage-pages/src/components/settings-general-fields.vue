@@ -42,6 +42,18 @@ const languages = computed(() => {
       :options="languages"
     />
 
+    <FieldCheckbox
+      v-model="settings.hardInterrupt"
+      v-motion
+      :initial="{ opacity: 0, y: 10 }"
+      :enter="{ opacity: 1, y: 0 }"
+      :duration="250 + (4 * 10)"
+      :delay="4 * 50"
+      :class="['transition-all', 'ease-in-out', 'duration-250']"
+      label="Hard Interrupt (Immediate cut-off)"
+      description="Instantly stops the currently playing audio instead of letting it finish the sentence."
+    />
+
     <slot name="additional-fields" />
 
     <div

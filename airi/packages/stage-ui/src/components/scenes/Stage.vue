@@ -34,6 +34,7 @@ import { useSpeechStore } from '../../stores/modules/speech'
 import { useProvidersStore } from '../../stores/providers'
 import { useSettings } from '../../stores/settings'
 import { useSpeechRuntimeStore } from '../../stores/speech-runtime'
+import { getSessionBusContext, sessionTtsSegmentStartedEvent } from '../../services/session/bus'
 
 withDefaults(defineProps<{
   paused?: boolean
@@ -65,12 +66,14 @@ const {
   live2dForceAutoBlinkEnabled,
   live2dShadowEnabled,
   live2dMaxFps,
+  hardInterrupt,
 } = storeToRefs(settingsStore)
 const { mouthOpenSize } = storeToRefs(useSpeakingStore())
 const { audioContext } = useAudioContext()
 const currentAudioSource = ref<AudioBufferSourceNode>()
 
-const { onBeforeMessageComposed, onBeforeSend, onTokenLiteral, onTokenSpecial, onStreamEnd, onAssistantResponseEnd } = useChatOrchestratorStore()
+const chatOrchestrator = useChatOrchestratorStore()
+const { onBeforeMessageComposed, onBeforeSend, onTokenLiteral, onTokenSpecial, onStreamEnd, onAssistantResponseEnd } = chatOrchestrator
 const chatHookCleanups: Array<() => void> = []
 // WORKAROUND: clear previous handlers on unmount to avoid duplicate calls when this component remounts.
 //             We keep per-hook disposers instead of wiping the global chat hooks to play nicely with
@@ -123,6 +126,8 @@ const speechStore = useSpeechStore()
 const { ssmlEnabled, activeSpeechProvider, activeSpeechModel, activeSpeechVoice, pitch } = storeToRefs(speechStore)
 const activeCardId = computed(() => activeCard.value?.name ?? 'default')
 const speechRuntimeStore = useSpeechRuntimeStore()
+const sessionBusContext = getSessionBusContext()
+
 
 const { currentMotion } = storeToRefs(useLive2d())
 
@@ -320,7 +325,10 @@ const speechPipeline = createSpeechPipeline<AudioBuffer>({
       return null
     }
   },
-  playback: playbackManager,
+  playback: {
+    ...playbackManager,
+    getWaitingCount: playbackManager.getWaitingCount,
+  },
 })
 
 void speechRuntimeStore.registerHost(speechPipeline)
@@ -330,13 +338,34 @@ speechPipeline.on('onSpecial', (segment) => {
     playSpecialToken(segment.special)
 })
 
+
+// onStart: TTS 오디오 재생 시작 시점 → text 포함하여 windows:chat에 started 신호 전송 → 텍스트 표시
+playbackManager.onStart(({ item }) => {
+  if (item.text && !item.special && item.sessionId) {
+    sessionBusContext.emit(sessionTtsSegmentStartedEvent, { sessionId: item.sessionId, text: item.text })
+  }
+})
+
 playbackManager.onEnd(({ item }) => {
-  if (item.special)
-    playSpecialToken(item.special)
+  if (item.text && !item.special) {   // Removed TTS log per user requested
+    // ;(window as any).logChat?.(`[TTS onEnd] sessionId=${item.sessionId ?? 'none'} text=${item.text.slice(0, 40)}`)
+    const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    ;(window as any).logChat?.(`[${ts}] [Airi] ${item.text}`)
+  }
 
   nowSpeaking.value = false
   mouthOpenSize.value = 0
 })
+
+playbackManager.onInterrupt(({ item, reason }) => {
+  if (item.text && !item.special) {
+    const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    ;(window as any).logChat?.(`[${ts}] [Airi][INTERRUPTED reason=${reason}] ${item.text}`)
+  }
+  nowSpeaking.value = false
+  mouthOpenSize.value = 0
+})
+
 
 playbackManager.onStart(({ item }) => {
   nowSpeaking.value = true
@@ -401,8 +430,7 @@ function setupAnalyser() {
 
 let currentChatIntent: ReturnType<typeof speechRuntimeStore.openIntent> | null = null
 
-chatHookCleanups.push(onBeforeMessageComposed(async () => {
-  playbackManager.stopAll('new-message')
+chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
 
   setupAnalyser()
   await setupLipSync()
@@ -412,30 +440,33 @@ chatHookCleanups.push(onBeforeMessageComposed(async () => {
     postCaption({ type: 'caption-assistant', text: '' })
   }
   catch (error) {
-    // BroadcastChannel may be closed if user navigated away - don't break flow
     console.warn('[Stage] Failed to post caption reset (channel may be closed)', { error })
   }
   try {
     postPresent({ type: 'assistant-reset' })
   }
   catch (error) {
-    // BroadcastChannel may be closed if user navigated away - don't break flow
     console.warn('[Stage] Failed to post present reset (channel may be closed)', { error })
   }
 
   if (currentChatIntent) {
-    currentChatIntent.cancel('new-message')
+    currentChatIntent.cancel('new-message', { keepActive: !hardInterrupt.value })
     currentChatIntent = null
   }
 
+  const sessionId = context.sessionId
   currentChatIntent = speechRuntimeStore.openIntent({
     ownerId: activeCardId.value,
+    sessionId,
     priority: 'normal',
     behavior: 'queue',
   })
 }))
 
-chatHookCleanups.push(onBeforeSend(async () => {
+chatHookCleanups.push(onBeforeSend(async (message) => {
+  // 채팅 로그: 유저 메시지
+  const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
+  ;(window as any).logChat?.(`[${ts}] [User] ${message}`)
   currentMotion.value = { group: EmotionThinkMotionName }
 }))
 
@@ -456,12 +487,6 @@ chatHookCleanups.push(onStreamEnd(async () => {
 chatHookCleanups.push(onAssistantResponseEnd(async (_message) => {
   currentChatIntent?.end()
   currentChatIntent = null
-  // const res = await embed({
-  //   ...transformersProvider.embed('Xenova/nomic-embed-text-v1'),
-  //   input: message,
-  // })
-
-  // await db.value?.execute(`INSERT INTO memory_test (vec) VALUES (${JSON.stringify(res.embedding)});`)
 }))
 
 onUnmounted(() => {

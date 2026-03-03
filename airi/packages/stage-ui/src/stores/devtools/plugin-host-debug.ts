@@ -17,7 +17,7 @@ export interface PluginRegistrySnapshot {
 
 export interface PluginCapabilityState {
   key: string
-  state: 'announced' | 'ready'
+  state: 'announced' | 'ready' | 'degraded' | 'withdrawn'
   metadata?: Record<string, unknown>
   updatedAt: number
 }

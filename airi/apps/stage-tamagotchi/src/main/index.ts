@@ -1,3 +1,5 @@
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { env, platform } from 'node:process'
 
 import { electronApp, optimizer } from '@electron-toolkit/utils'
@@ -30,6 +32,32 @@ import { setupWidgetsWindowManager } from './windows/widgets'
 // TODO: once we refactored eventa to support window-namespaced contexts,
 // we can remove the setMaxListeners call below since eventa will be able to dispatch and
 // manage events within eventa's context system.
+// LLM 파일 로깅 IPC 핸들러
+// renderer에서 ipcRenderer.invoke('log:llm', entry) 호출 시 logs/llm.log에 저장
+let _logsDir: string | null = null
+function getLogsDir(): string {
+  if (!_logsDir) {
+    _logsDir = join(app.getPath('userData'), 'logs')
+    try { mkdirSync(_logsDir, { recursive: true }) }
+    catch { /* ignore */ }
+  }
+  return _logsDir
+}
+
+ipcMain.handle('log:llm', (_event, line: string) => {
+  try {
+    appendFileSync(join(getLogsDir(), 'llm.log'), line + '\n', 'utf-8')
+  }
+  catch { /* 로그 실패는 무시 */ }
+})
+
+ipcMain.handle('log:chat', (_event, line: string) => {
+  try {
+    appendFileSync(join(getLogsDir(), 'chat.log'), line + '\n', 'utf-8')
+  }
+  catch { /* 로그 실패는 무시 */ }
+})
+
 ipcMain.setMaxListeners(100)
 
 setElectronMainDirname(__dirname)

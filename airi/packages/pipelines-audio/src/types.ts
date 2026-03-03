@@ -49,6 +49,7 @@ export interface PlaybackItem<TAudio> {
   intentId: string
   segmentId: string
   ownerId?: string
+  sessionId?: string
   priority: number
   text: string
   special: string | null
@@ -84,6 +85,7 @@ export interface IntentOptions {
   streamId?: string
   priority?: PriorityLevel | number
   ownerId?: string
+  sessionId?: string
   behavior?: IntentBehavior
 }
 
@@ -96,7 +98,7 @@ export interface IntentHandle {
   writeSpecial: (special: string) => void
   writeFlush: () => void
   end: () => void
-  cancel: (reason?: string) => void
+  cancel: (reason?: string, options?: { keepActive?: boolean }) => void
   stream: ReadableStream<TextToken>
 }
 

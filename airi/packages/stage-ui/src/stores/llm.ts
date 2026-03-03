@@ -8,24 +8,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import { debug, mcp } from '../tools'
-
-// LLM API 콜 로거 (echo-memory 없이도 동작하는 경량 fallback)
-const _llmLog = {
-  request: (info: { baseURL: string, model: string, msgCount: number }) => {
-    // eslint-disable-next-line no-console
-    console.debug(
-      `[LLM→] ${new Date().toISOString().slice(11, 23)} [MAIN] ${info.model} @ ${info.baseURL} | ${info.msgCount} msgs`,
-    )
-    return Date.now()
-  },
-  response: (startedAt: number, text: string, usage?: any) => {
-    const ms = Date.now() - startedAt
-    // eslint-disable-next-line no-console
-    console.debug(
-      `[LLM←] ${new Date().toISOString().slice(11, 23)} [MAIN] ${ms}ms | ${text.length}chars${usage ? ` | tokens: ${JSON.stringify(usage)}` : ''}`,
-    )
-  },
-}
+import { isGeminiProvider, streamGeminiNative } from './gemini-utils'
 
 export type StreamEvent
   = | { type: 'text-delta', text: string }
@@ -39,7 +22,7 @@ export interface StreamOptions {
   onStreamEvent?: (event: StreamEvent) => void | Promise<void>
   toolsCompatibility?: Map<string, boolean>
   supportsTools?: boolean
-  waitForTools?: boolean // when true,won't resolve on finishReason=='tool_calls';
+  waitForTools?: boolean // when true, won't resolve on finishReason=='tool_calls'
   tools?: Tool[] | (() => Promise<Tool[] | undefined>)
 }
 
@@ -60,7 +43,7 @@ function streamOptionsToolsCompatibilityOk(model: string, chatProvider: ChatProv
   return !!(options?.supportsTools || options?.toolsCompatibility?.get(`${chatProvider.chat(model).baseURL}-${model}`))
 }
 
-async function streamFrom(model: string, chatProvider: ChatProvider, messages: Message[], options?: StreamOptions) {
+async function streamFrom(model: string, chatProvider: ChatProvider, promptNode: Message, messages: Message[], options?: StreamOptions) {
   const headers = options?.headers
 
   const sanitized = sanitizeMessages(messages as unknown[])
@@ -114,32 +97,34 @@ async function streamFrom(model: string, chatProvider: ChatProvider, messages: M
     }
 
     try {
-      // ── LLM 요청 로그 ──────────────────────────────────────
-      const _providerConfig = chatProvider.chat(model)
-      const _t0 = _llmLog.request({
-        baseURL: String(_providerConfig.baseURL ?? '(unknown)'),
-        model,
-        msgCount: sanitized.length,
-      })
-      let _fullText = ''
-      // ────────────────────────────────────────────────────────
+      // ── Gemini native SDK 경로 ────────────────────────────────
+      if (isGeminiProvider(chatProvider, model)) {
+        const apiKey = (import.meta.env as any).VITE_GEMINI_API_KEY as string | undefined
+        if (!apiKey) {
+          rejectOnce(new Error('VITE_GEMINI_API_KEY is not set'))
+          return
+        }
+        streamGeminiNative(
+          model,
+          apiKey,
+          promptNode,
+          sanitized,
+          tools,
+          event => onEvent(event as any),
+          line => { (window as any).logLLM?.(line) },
+        ).catch(rejectOnce)
+        return
+      }
+      // ─────────────────────────────────────────────────────────
 
       streamText({
-        ..._providerConfig,
+        ...chatProvider.chat(model),
         maxSteps: 10,
-        messages: sanitized,
+        messages: [promptNode, ...sanitized],
         headers,
         // TODO: we need Automatic tools discovery
         tools,
-        onEvent: async (event) => {
-          // ── 응답 토큰 누적 & 완료 로그 ───────────────────────
-          if (event && (event as any).type === 'text-delta')
-            _fullText += (event as any).text ?? ''
-          if (event && (event as any).type === 'finish')
-            _llmLog.response(_t0, _fullText, (event as any).usage)
-          // ─────────────────────────────────────────────────────
-          await onEvent(event)
-        },
+        onEvent,
       })
     }
     catch (err) {
@@ -151,7 +136,9 @@ async function streamFrom(model: string, chatProvider: ChatProvider, messages: M
 export async function attemptForToolsCompatibilityDiscovery(model: string, chatProvider: ChatProvider, _: Message[], options?: Omit<StreamOptions, 'supportsTools'>): Promise<boolean> {
   async function attempt(enable: boolean) {
     try {
-      await streamFrom(model, chatProvider, [{ role: 'user', content: 'Hello, world!' }], { ...options, supportsTools: enable })
+      const mockPromptNode = { role: 'system', content: 'You are a test bot.', id: 'test-node' } as Message
+      const mockUserMessage = { role: 'user', content: 'Hello, world!', id: 'test-msg' } as Message
+      await streamFrom(model, chatProvider, mockPromptNode, [mockUserMessage], { ...options, supportsTools: enable })
       return true
     }
     catch (err) {
@@ -221,9 +208,43 @@ export async function attemptForToolsCompatibilityDiscovery(model: string, chatP
 export const useLLM = defineStore('llm', () => {
   const toolsCompatibility = ref<Map<string, boolean>>(new Map())
 
-  async function discoverToolsCompatibility(model: string, chatProvider: ChatProvider, _: Message[], options?: Omit<StreamOptions, 'supportsTools'>) {
+  /**
+   * sessionId → TTS 변환 완료됐지만 아직 발화되지 않은 LLM 원본 텍스트 세그먼트 큐.
+   * Stage.vue onTtsResult 시점에 enqueueLlmSegment로 적재되고,
+   * TTS 발화 완료(sessionTtsSegmentPlayedEvent) 시 dequeueLlmSegment로 순서대로 꺼낸다.
+   */
+  const pendingLlmSegments = new Map<string, string[]>()
+
+  /** TTS 요청 시점(문장 확정 후, TTS 생성 전)에 세그먼트를 큐에 적재 (Stage.vue onTtsRequest에서 호출) */
+  function enqueueLlmSegment(sessionId: string, text: string) {
+    const trimmed = text.trim()
+    if (!trimmed)
+      return
+    const q = pendingLlmSegments.get(sessionId) ?? []
+    q.push(trimmed)
+    pendingLlmSegments.set(sessionId, q)
+  }
+
+  /** TTS 발화 완료 시점에 순서대로 세그먼트 꺼내기 (session-store bindSessionBus에서 호출) */
+  function dequeueLlmSegment(sessionId: string): string | undefined {
+    const text = pendingLlmSegments.get(sessionId)?.shift()
+    return text
+  }
+
+  /** 인터럽트 등으로 해당 세션 큐 전체 초기화 */
+  function clearLlmSegments(sessionId: string) {
+    pendingLlmSegments.delete(sessionId)
+  }
+
+  async function discoverToolsCompatibility(model: string, chatProvider: ChatProvider, _: Message[], options?: Omit<StreamOptions, 'supportsTools'> & { force?: boolean }) {
     // Cached, no need to discover again
     if (toolsCompatibility.value.has(`${chatProvider.chat(model).baseURL}-${model}`)) {
+      return
+    }
+
+    // Skip discovery if no tools are functionally required and we aren't forcing an upfront check
+    if (!options?.force && (!options?.tools || (Array.isArray(options.tools) && options.tools.length === 0))) {
+      toolsCompatibility.value.set(`${chatProvider.chat(model).baseURL}-${model}`, false)
       return
     }
 
@@ -231,8 +252,8 @@ export const useLLM = defineStore('llm', () => {
     toolsCompatibility.value.set(`${chatProvider.chat(model).baseURL}-${model}`, res)
   }
 
-  function stream(model: string, chatProvider: ChatProvider, messages: Message[], options?: StreamOptions) {
-    return streamFrom(model, chatProvider, messages, { ...options, toolsCompatibility: toolsCompatibility.value })
+  function stream(model: string, chatProvider: ChatProvider, promptNode: Message, messages: Message[], options?: StreamOptions) {
+    return streamFrom(model, chatProvider, promptNode, messages, { ...options, toolsCompatibility: toolsCompatibility.value })
   }
 
   async function models(apiUrl: string, apiKey: string) {
@@ -259,5 +280,8 @@ export const useLLM = defineStore('llm', () => {
     models,
     stream,
     discoverToolsCompatibility,
+    enqueueLlmSegment,
+    dequeueLlmSegment,
+    clearLlmSegments,
   }
 })

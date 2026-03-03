@@ -251,6 +251,15 @@ export function createPlaybackManager<TAudio>(options: PlaybackManagerOptions<TA
     }
   }
 
+  function clearWaitingByIntent(intentId: string, reason: string) {
+    for (let i = waiting.length - 1; i >= 0; i -= 1) {
+      if (waiting[i]?.item.intentId === intentId) {
+        emitReject(waiting[i]!.item, reason)
+        waiting.splice(i, 1)
+      }
+    }
+  }
+
   function stopByOwner(ownerId: string, reason: string) {
     for (const entry of active.values()) {
       if (entry.item.ownerId !== ownerId)
@@ -264,14 +273,25 @@ export function createPlaybackManager<TAudio>(options: PlaybackManagerOptions<TA
     }
   }
 
+  function getWaitingCount() {
+    return waiting.length
+  }
+
+  function getActiveCount() {
+    return active.size
+  }
+
   return {
     schedule,
     stopAll,
     stopByIntent,
+    clearWaitingByIntent,
     stopByOwner,
     onStart,
     onEnd,
     onInterrupt,
     onReject,
+    getWaitingCount,
+    getActiveCount,
   }
 }
