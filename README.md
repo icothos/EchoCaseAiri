@@ -9,7 +9,8 @@ EchoCast × Airi 통합 프로젝트 메모장.
 ```
 EchoCaseAiri/
 ├── airi/           # Project AIRI (upstream fork)
-│   ├── packages/echo-memory/   # 우리가 추가한 커스텀 패키지
+│   ├── packages/echo-memory/   # 커스텀 패키지: Tri-Core 메모리 + sLLM Bouncer
+│   ├── packages/gemini-utils/  # 커스텀 패키지: @google/genai 공유 유틸
 │   └── analysis/               # 아키텍처 분석 문서들
 └── EchoCast/       # 기존 EchoCast (Python 원본)
 ```
@@ -37,57 +38,132 @@ EchoCaseAiri/
 | P0 | ✅ | 패키지 스캐폴딩 |
 | P1 | ✅ | Hot Context Pool (ContextNode, Top-K, updateNode) |
 | P2 | ✅ | Fast-path Filter (정규식 즉시 drop) |
-| P3 | ✅ | sLLM Bouncer (llama.cpp HTTP, ignore/pass/rag) |
+| P3 | ✅ | sLLM Bouncer (llama.cpp HTTP + **Gemini native SDK**) |
 | P4 | ✅ | Airi 연결 레이어 (mountEchoMemory) |
-| P5 | ✅ | Summarizer + Progress 업데이트 |
-| P6 | ⬜ | 자율 발화 컨텍스트 주입 (spark:notify 어댑터) |
+| P5 | ✅ | Summarizer + Progress 업데이트 (**Gemini native SDK 지원**) |
+| P6 | ✅ | 자율 발화 컨텍스트 주입 (spark:notify idle 어댑터) |
 | P7 | ⬜ | 치지직 어댑터 연결 |
 | P8 | ⬜ | Cold DB RAG (pgvector) |
 
 ---
 
-## 🏗️ LLM 콜 스택 (분석 완료)
+## 📦 gemini-utils 패키지
+
+`airi/packages/gemini-utils` — `@google/genai` SDK 공유 유틸리티.
+`echo-memory`와 `stage-ui` 양쪽에서 공유하는 Gemini 전용 코드.
 
 ```
-ChatProvider.chat(model)            ← { baseURL, apiKey, model }
-  → streamText({ ...options })      ← @xsai/stream-text
-      → chat({ stream: true })      ← @xsai/shared-chat
-          → (options.fetch ?? globalThis.fetch)(baseURL + "/chat/completions")
+packages/gemini-utils/src/
+├── client.ts   — GoogleGenAI 인스턴스 캐시(apiKey별), isGeminiUrl()
+├── call.ts     — callGemini() 단건 completion (Bouncer/Summarizer용)
+├── stream.ts   — streamGemini() 스트리밍 + 내부 로깅
+└── tokens.ts   — countGeminiTokens() REST API 토큰 카운팅 (fallback용)
 ```
 
-### 후킹 포인트
+### 설계 원칙
 
-`options.fetch` 커스텀 주입으로 **Airi 코드 수정 없이** 모든 HTTP 요청/응답 로깅 가능.
+- **인스턴스 캐싱**: `getGenAI(apiKey)` — 동일 apiKey로 재사용
+- **로깅 내재화**: `streamGemini()`가 요청/응답/토큰을 `console.debug` + `onLog` 콜백으로 처리
+- **xsai 비의존**: 범용 타입(role/content 객체)만 사용
+- **URL 기반 감지**: `isGeminiUrl(url)` — `generativelanguage.googleapis.com` 포함 여부
 
 ---
 
-## 💡 미결 아이디어 & TODO
+## 🗄️ 채팅 DB 관리
 
-### Native Provider Adapter (미구현, 후순위)
+### 관련 파일
 
-Gemini/Grok 등 네이티브 API가 OpenAI 호환보다 빠를 수 있음.
-`options.fetch`를 교체하는 방식으로 `ChatProvider` 인터페이스를 유지하면서
-내부 구현만 네이티브 SDK로 교체 가능.
+| 파일 | 역할 |
+|------|------|
+| `packages/stage-ui/src/stores/chat/session-store.ts` | 세션 생성/로드/삭제/초기화 핵심 로직 |
+| `packages/stage-ui/src/stores/chat/maintenance.ts` | UI용 래퍼 (`cleanupMessages`, `resetAllSessions`) |
+| `packages/stage-ui/src/database/repos/chat-sessions.repo.ts` | IndexedDB CRUD (unstorage 기반) |
+| `packages/stage-layouts/src/components/Widgets/ChatActionButtons.vue` | UI 버튼 (채팅 초기화, DB 초기화) |
 
-```typescript
-// 아이디어: packages/ai-provider (미구현)
-createGeminiNativeProvider(apiKey) → ChatProvider
-  └─ chat(model).fetch = 네이티브 Gemini SDK로 교체
-  └─ Airi streamText()에 그대로 전달 (인터페이스 동일)
+### 초기화 방식 비교
+
+| 방식 | 함수 | 범위 | 설명 |
+|------|------|------|------|
+| 🗑️ 현재 세션 초기화 | `cleanupMessages()` | 현재 세션만 | system 메시지만 남기고 메모리+DB 초기화 |
+| 🗄️ DB 전체 초기화 | `resetAllSessions()` | 모든 세션 | IndexedDB에서 모든 채팅 데이터 삭제 후 새 세션 생성 |
+| 🔧 개발 시작 시 자동 | `VITE_DEV_CLEAR_CHAT=1` | 모든 세션 | 앱 initialize 시점에 DB를 먼저 비움 (race condition 없음) |
+
+### `VITE_DEV_CLEAR_CHAT` 동작 원리
+
+```
+앱 시작
+  └─ session-store.initialize()
+       ├─ [VITE_DEV_CLEAR_CHAT=1] chatSessionsRepo.getIndex() → 모든 session 삭제
+       │   └─ chatSessionsRepo.saveIndex({ characters: {} })  ← 빈 index DB에 저장
+       └─ ensureActiveSessionForCharacter() → 새 세션 생성
 ```
 
-> **현재 결정**: OpenAI 호환 엔드포인트로 진행.
-> Gemini OpenAI compat (`generativelanguage.googleapis.com/v1beta/openai/`)도 구글 직접 운영이라 성능 차 미미함.
+> **⚠️ 주의**: `dev-seed.ts`에서 IndexedDB를 직접 조작하면 `session-store` 로드와 race condition이 발생하므로, 반드시 `session-store.initialize()`에서 처리해야 합니다.
+
+### `.env.local` 설정
+
+```env
+# 앱 시작 시 채팅 DB 전체 초기화 (개발용)
+VITE_DEV_CLEAR_CHAT=1
+
+# 기존 설정 강제 덮어쓰기
+VITE_DEV_FORCE=1
+```
+
+---
+
+## 🏗️ LLM 콜 스택 (현재)
+
+```
+streamFrom(model, chatProvider, messages)
+  │
+  ├─ [Gemini 경로] isGeminiProvider() → true
+  │    └─ streamGeminiNative()        ← stage-ui/gemini-utils.ts (xsai 타입 래퍼)
+  │         └─ streamGemini()         ← @proj-airi/gemini-utils (SDK 직접 호출)
+  │              └─ GoogleGenAI.models.generateContentStream()
+  │
+  └─ [xsai 경로] isGeminiProvider() → false
+       └─ streamText()               ← @xsai/stream-text
+            └─ fetch(baseURL + "/chat/completions")
+```
+
+**Bouncer / Summarizer (echo-memory):**
+
+```
+callLLM(baseUrl, model, messages)
+  ├─ [Gemini] isGeminiUrl() → callGemini()         ← @proj-airi/gemini-utils
+  └─ [그 외]  fetch(baseUrl + "/v1/chat/completions")
+```
+
+## 🎙️ 오디오 인터럽트 시스템 (Audio Interrupt)
+
+사용자가 캐릭터 발화 도중 채팅을 입력할 때 발생하는 오디오 중단(Interrupt) 동작을 두 가지 모드로 지원합니다. 이 설정은 `Settings -> System -> General`의 **Hard Interrupt** 토글을 통해 제어됩니다.
+
+| 모드 | 동작 방식 | 로직 특성 |
+|------|-----------|-----------|
+| **Soft Interrupt**<br/>(기본값) | 현재 입 밖으로 내뱉고 있던 문장까지만 끝까지 말하고 자연스럽게 재생을 마칩니다. | `playbackManager`의 현재 재생 노드(`active`)는 유지하고 대기 큐(`waiting`)만 비웁니다 (`clearWaitingByIntent`). |
+| **Hard Interrupt** | 즉시 오디오 출력을 강제 종료하고 끊습니다. | 기존처럼 `playbackManager.stopByIntent`를 호출하여 재생 중인 노드와 대기 큐를 모두 즉시 파기합니다. |
+
+*참고: 어떤 인터럽트 방식을 사용하든, LLM 대화 기록(Context)에는 구조적으로 "재생이 시작된(onStart) 문장"까지만 기록되므로 AI의 기억 동기화가 정확히 유지됩니다.*
+
+---
+
+## 💡 알려진 사항 & TODO
+
+### Tools Compatibility (Gemini)
+
+현재 Gemini provider도 `attemptForToolsCompatibilityDiscovery`를 거쳐 tools compatibility를 확인한다.
+Gemini는 function calling을 natively 지원하므로 이 단계는 불필요하지만, 현재는 그대로 유지.
 
 ### LLM 로거 (echo-memory에 포함됨)
 
 `echo-memory/src/logger.ts` — BOUNCER/SUMMARIZER 역할별 REQUEST/RESPONSE 로그.
-메인 LLM은 `onBeforeMessageComposed` / `onChatTurnComplete` 훅에서 캡처 가능.
+Gemini 스트리밍 로그는 `gemini-utils/stream.ts` 내부에서 처리.
 
 ---
 
 ## 🚀 다음 단계
 
-1. `pnpm i` 완료 후 typecheck 실행
-2. `stage-web` app에서 `mountEchoMemory()` 호출 연결 (실제 테스트)
-3. P6: spark:notify 자율 발화 컨텍스트 주입 어댑터
+1. P7: 치지직 어댑터 연결
+2. P8: Cold DB RAG (pgvector)
+3. (선택) Gemini tools 강제 활성화 — discovery 없이 항상 tools 사용 가능하게

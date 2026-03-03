@@ -13,6 +13,7 @@ export interface ChatHookRegistry {
   onAssistantResponseEnd: (cb: (message: string, context: ChatStreamEventContext) => Promise<void>) => () => void
   onAssistantMessage: (cb: (message: StreamingAssistantMessage, messageText: string, context: ChatStreamEventContext) => Promise<void>) => () => void
   onChatTurnComplete: (cb: (chat: { output: StreamingAssistantMessage, outputText: string, toolCalls: ToolMessage[] }, context: ChatStreamEventContext) => Promise<void>) => () => void
+  onAutoSpeak: (cb: (sessionId?: string) => Promise<void>) => () => void
   emitBeforeMessageComposedHooks: (message: string, context: Omit<ChatStreamEventContext, 'composedMessage'>) => Promise<void>
   emitAfterMessageComposedHooks: (message: string, context: ChatStreamEventContext) => Promise<void>
   emitBeforeSendHooks: (message: string, context: ChatStreamEventContext) => Promise<void>
@@ -23,6 +24,7 @@ export interface ChatHookRegistry {
   emitAssistantResponseEndHooks: (message: string, context: ChatStreamEventContext) => Promise<void>
   emitAssistantMessageHooks: (message: StreamingAssistantMessage, messageText: string, context: ChatStreamEventContext) => Promise<void>
   emitChatTurnCompleteHooks: (chat: { output: StreamingAssistantMessage, outputText: string, toolCalls: ToolMessage[] }, context: ChatStreamEventContext) => Promise<void>
+  emitAutoSpeakHooks: (sessionId?: string) => Promise<void>
   clearHooks: () => void
 }
 
@@ -37,6 +39,7 @@ export function createChatHooks(): ChatHookRegistry {
   const onAssistantResponseEndHooks: Array<(message: string, context: ChatStreamEventContext) => Promise<void>> = []
   const onAssistantMessageHooks: Array<(message: StreamingAssistantMessage, messageText: string, context: ChatStreamEventContext) => Promise<void>> = []
   const onChatTurnCompleteHooks: Array<(chat: { output: StreamingAssistantMessage, outputText: string, toolCalls: ToolMessage[] }, context: ChatStreamEventContext) => Promise<void>> = []
+  const onAutoSpeakHooks: Array<(sessionId?: string) => Promise<void>> = []
 
   function onBeforeMessageComposed(cb: (message: string, context: Omit<ChatStreamEventContext, 'composedMessage'>) => Promise<void>) {
     onBeforeMessageComposedHooks.push(cb)
@@ -128,6 +131,15 @@ export function createChatHooks(): ChatHookRegistry {
     }
   }
 
+  function onAutoSpeak(cb: (sessionId?: string) => Promise<void>) {
+    onAutoSpeakHooks.push(cb)
+    return () => {
+      const index = onAutoSpeakHooks.indexOf(cb)
+      if (index >= 0)
+        onAutoSpeakHooks.splice(index, 1)
+    }
+  }
+
   function clearHooks() {
     onBeforeMessageComposedHooks.length = 0
     onAfterMessageComposedHooks.length = 0
@@ -139,6 +151,7 @@ export function createChatHooks(): ChatHookRegistry {
     onAssistantResponseEndHooks.length = 0
     onAssistantMessageHooks.length = 0
     onChatTurnCompleteHooks.length = 0
+    onAutoSpeakHooks.length = 0
   }
 
   async function emitBeforeMessageComposedHooks(message: string, context: Omit<ChatStreamEventContext, 'composedMessage'>) {
@@ -191,6 +204,11 @@ export function createChatHooks(): ChatHookRegistry {
       await hook(chat, context)
   }
 
+  async function emitAutoSpeakHooks(sessionId?: string) {
+    for (const hook of onAutoSpeakHooks)
+      await hook(sessionId)
+  }
+
   return {
     onBeforeMessageComposed,
     onAfterMessageComposed,
@@ -202,6 +220,7 @@ export function createChatHooks(): ChatHookRegistry {
     onAssistantResponseEnd,
     onAssistantMessage,
     onChatTurnComplete,
+    onAutoSpeak,
     emitBeforeMessageComposedHooks,
     emitAfterMessageComposedHooks,
     emitBeforeSendHooks,
@@ -212,6 +231,7 @@ export function createChatHooks(): ChatHookRegistry {
     emitAssistantResponseEndHooks,
     emitAssistantMessageHooks,
     emitChatTurnCompleteHooks,
+    emitAutoSpeakHooks,
     clearHooks,
   }
 }

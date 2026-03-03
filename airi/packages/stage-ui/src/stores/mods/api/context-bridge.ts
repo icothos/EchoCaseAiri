@@ -238,6 +238,13 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
             },
           })
         }),
+
+        chatOrchestrator.onAutoSpeak(async (sessionId) => {
+          if (isProcessingRemoteStream)
+            return
+
+          broadcastStreamEvent({ type: 'auto-speak', sessionId })
+        }),
       )
 
       const { stop: stopIncomingStreamWatch } = watch(incomingStreamEvent, async (event) => {
@@ -250,6 +257,9 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
           // Use the receiver's active session to avoid clobbering chat state when events come from other windows/devtools.
           switch (event.type) {
             case 'before-compose':
+              if (event.context.turnToken) {
+                chatOrchestrator.currentTurnToken = event.context.turnToken
+              }
               await chatOrchestrator.emitBeforeMessageComposedHooks(event.message, event.context)
               break
             case 'after-compose':
@@ -303,6 +313,9 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
               chatStream.finalizeStream(event.message)
               chatOrchestrator.sending = false
               remoteStreamGuard = null
+              break
+            case 'auto-speak':
+              await chatOrchestrator.emitAutoSpeakHooks(event.sessionId)
               break
           }
         }

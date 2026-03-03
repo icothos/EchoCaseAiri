@@ -27,6 +27,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useDelayMessageQueue, useEmotionsMessageQueue } from '../../composables/queues'
 import { llmInferenceEndToken } from '../../constants'
 import { EMOTION_EmotionMotionName_value, EMOTION_VRMExpressionName_value, EmotionThinkMotionName } from '../../constants/emotions'
+import { getSessionBusContext, sessionTtsSegmentStartedEvent } from '../../services/session/bus'
 import { useAudioContext, useSpeakingStore } from '../../stores/audio'
 import { useChatOrchestratorStore } from '../../stores/chat'
 import { useAiriCardStore } from '../../stores/modules'
@@ -34,7 +35,6 @@ import { useSpeechStore } from '../../stores/modules/speech'
 import { useProvidersStore } from '../../stores/providers'
 import { useSettings } from '../../stores/settings'
 import { useSpeechRuntimeStore } from '../../stores/speech-runtime'
-import { getSessionBusContext, sessionTtsSegmentStartedEvent } from '../../services/session/bus'
 
 withDefaults(defineProps<{
   paused?: boolean
@@ -74,6 +74,7 @@ const currentAudioSource = ref<AudioBufferSourceNode>()
 
 const chatOrchestrator = useChatOrchestratorStore()
 const { onBeforeMessageComposed, onBeforeSend, onTokenLiteral, onTokenSpecial, onStreamEnd, onAssistantResponseEnd } = chatOrchestrator
+const { currentTurnToken } = storeToRefs(chatOrchestrator)
 const chatHookCleanups: Array<() => void> = []
 // WORKAROUND: clear previous handlers on unmount to avoid duplicate calls when this component remounts.
 //             We keep per-hook disposers instead of wiping the global chat hooks to play nicely with
@@ -127,7 +128,6 @@ const { ssmlEnabled, activeSpeechProvider, activeSpeechModel, activeSpeechVoice,
 const activeCardId = computed(() => activeCard.value?.name ?? 'default')
 const speechRuntimeStore = useSpeechRuntimeStore()
 const sessionBusContext = getSessionBusContext()
-
 
 const { currentMotion } = storeToRefs(useLive2d())
 
@@ -338,7 +338,6 @@ speechPipeline.on('onSpecial', (segment) => {
     playSpecialToken(segment.special)
 })
 
-
 // onStart: TTS 오디오 재생 시작 시점 → text 포함하여 windows:chat에 started 신호 전송 → 텍스트 표시
 playbackManager.onStart(({ item }) => {
   if (item.text && !item.special && item.sessionId) {
@@ -347,7 +346,7 @@ playbackManager.onStart(({ item }) => {
 })
 
 playbackManager.onEnd(({ item }) => {
-  if (item.text && !item.special) {   // Removed TTS log per user requested
+  if (item.text && !item.special) { // Removed TTS log per user requested
     // ;(window as any).logChat?.(`[TTS onEnd] sessionId=${item.sessionId ?? 'none'} text=${item.text.slice(0, 40)}`)
     const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
     ;(window as any).logChat?.(`[${ts}] [Airi] ${item.text}`)
@@ -355,6 +354,16 @@ playbackManager.onEnd(({ item }) => {
 
   nowSpeaking.value = false
   mouthOpenSize.value = 0
+
+  // 마지막 TTS 세그먼트(= 큐가 비어있음) → auto-speak 스케줄
+  if (playbackManager.getWaitingCount() === 0) {
+    const token = item.intentId || currentTurnToken.value
+    if (token) {
+      // eslint-disable-next-line no-console
+      console.debug('[Stage] 마지막 TTS 완료 - auto-speak 스케줄 (token:', token.slice(0, 8), ')')
+      void chatOrchestrator.scheduleAutoSpeak(token, Number(import.meta.env.VITE_AUTO_SPEAK_IDLE_MS ?? 5_000), item.sessionId)
+    }
+  }
 })
 
 playbackManager.onInterrupt(({ item, reason }) => {
@@ -362,10 +371,7 @@ playbackManager.onInterrupt(({ item, reason }) => {
     const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
     ;(window as any).logChat?.(`[${ts}] [Airi][INTERRUPTED reason=${reason}] ${item.text}`)
   }
-  nowSpeaking.value = false
-  mouthOpenSize.value = 0
 })
-
 
 playbackManager.onStart(({ item }) => {
   nowSpeaking.value = true
@@ -431,7 +437,6 @@ function setupAnalyser() {
 let currentChatIntent: ReturnType<typeof speechRuntimeStore.openIntent> | null = null
 
 chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
-
   setupAnalyser()
   await setupLipSync()
   // Reset assistant caption for a new message
@@ -458,6 +463,7 @@ chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
   currentChatIntent = speechRuntimeStore.openIntent({
     ownerId: activeCardId.value,
     sessionId,
+    intentId: context.turnToken,
     priority: 'normal',
     behavior: 'queue',
   })

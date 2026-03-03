@@ -80,7 +80,7 @@ export function mountEchoMemory(
 
     const cleanups: Array<() => void> = []
 
-    // ① Hot Context 주입 및 Bouncer: LLM 호출 직전
+    // ② Hot Context 주입 및 Bouncer: LLM 호출 직전
     // (Bouncer가 await 되어야 메인 LLM이 기다려 줌)
     cleanups.push(chatOrchestratorStore.onBeforeMessageComposed(async (messageText) => {
         // Bouncer 처리
@@ -93,6 +93,7 @@ export function mountEchoMemory(
                 // eslint-disable-next-line no-console
                 console.debug('[echo-memory] Bouncer: ignore', text.slice(0, 40))
                 // 중요: onBeforeMessageComposed에서 에러를 던지면 ingest(메인 LLM)가 중단됨
+                // (이 경우 AI가 실제로 응답하지 않으므로 isSpeaking 플래그를 세우지 않음)
                 throw new Error('BOUNCER_IGNORE')
             }
 
@@ -120,7 +121,7 @@ export function mountEchoMemory(
         }
     }))
 
-    // ③ AI 응답 완료 후: Progress 업데이트 + Summarizer 트리거
+    // ③ AI 응답 완료 후: Progress 업데이트 + Summarizer 트리거 + autoSpeak 타이머 리셋
     cleanups.push(chatOrchestratorStore.onChatTurnComplete(async ({ outputText }) => {
         summarizer.addMessage('assistant', outputText)
 
@@ -143,7 +144,9 @@ export function mountEchoMemory(
         bouncer,
         summarizer,
         /** 모든 훅 해제 (컴포넌트 unmount 시 호출) */
-        dispose: () => cleanups.forEach(fn => fn()),
+        dispose: () => {
+            cleanups.forEach(fn => fn())
+        },
     }
 }
 

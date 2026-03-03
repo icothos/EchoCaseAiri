@@ -58,6 +58,7 @@ export interface EchoMemoryOptions {
     summarizer?: SummarizerOptions
 }
 
+
 /** 공통 LLM 엔드포인트 설정 (Bouncer/Summarizer 둘 다 사용) */
 export interface LLMEndpointOptions {
     /** HTTP 서버 base URL (예: http://localhost:8080, https://generativelanguage.googleapis.com/v1beta/openai) */

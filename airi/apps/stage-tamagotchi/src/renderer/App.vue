@@ -1,24 +1,27 @@
 <script setup lang="ts">
+import type { EchoMemoryInstance } from '@proj-airi/echo-memory'
+
 import { defineInvokeHandler } from '@moeru/eventa'
+import { mountEchoMemory } from '@proj-airi/echo-memory'
 import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { themeColorFromValue, useThemeColor } from '@proj-airi/stage-layouts/composables/theme-color'
 import { ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useSharedAnalyticsStore } from '@proj-airi/stage-ui/stores/analytics'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
+import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
+import { useChatContextStore } from '@proj-airi/stage-ui/stores/chat/context-store'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { usePluginHostInspectorStore } from '@proj-airi/stage-ui/stores/devtools/plugin-host-debug'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
-import { useChatContextStore } from '@proj-airi/stage-ui/stores/chat/context-store'
-import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/context-bridge'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
+import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
 import { listProvidersForPluginHost, shouldPublishPluginHostCapabilities } from '@proj-airi/stage-ui/stores/plugin-host-capabilities'
+import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
-import { mountEchoMemory } from '@proj-airi/echo-memory'
-import type { EchoMemoryInstance } from '@proj-airi/echo-memory'
 import { useTheme } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { onMounted, onUnmounted, watch } from 'vue'
@@ -60,6 +63,9 @@ const serverChannelStore = useModsServerChannelStore()
 const chatOrchestratorStore = useChatOrchestratorStore()
 const chatContextStore = useChatContextStore()
 const characterOrchestratorStore = useCharacterOrchestratorStore()
+const consciousnessStore = useConsciousnessStore()
+const { activeProvider, activeModel } = storeToRefs(consciousnessStore)
+const providersStore = useProvidersStore()
 const analyticsStore = useSharedAnalyticsStore()
 const pluginHostInspectorStore = usePluginHostInspectorStore()
 usePerfTracerBridgeStore()
@@ -113,9 +119,9 @@ onMounted(async () => {
   // ── echo-memory 마운트 ─────────────────────────────────────────────
   console.log('[App.vue] .env dump:', {
     bouncerBase: import.meta.env.VITE_BOUNCER_BASE_URL,
-    geminiKey: import.meta.env.VITE_GEMINI_API_KEY ? 'EXISTS' : 'MISSING'
+    geminiKey: import.meta.env.VITE_GEMINI_API_KEY ? 'EXISTS' : 'MISSING',
   })
-  
+
   // .env.local에서 설정 읽기. VITE_BOUNCER_BASE_URL 없으면 echo-memory 비활성화
   const bouncerBaseUrl = import.meta.env.VITE_BOUNCER_BASE_URL
   if (bouncerBaseUrl) {
@@ -178,14 +184,33 @@ onMounted(async () => {
                 },
               }
             : {}),
+        autoSpeak: undefined,
       },
     )
-    console.debug('[echo-memory] mounted (tamagotchi)', echoMemory)
+    console.info('[echo-memory] mounted (tamagotchi)', echoMemory)
   }
   else {
-    console.debug('[echo-memory] 비활성화 (VITE_BOUNCER_BASE_URL 미설정)')
+    console.info('[echo-memory] 비활성화 (VITE_BOUNCER_BASE_URL 미설정)')
   }
-  // ────────────────────────────────────────────────────────────────────
+
+  // ── auto-speak: onAutoSpeak 훅으로 ingest() 토대 (sendQueue 경유) ────────────────
+  chatOrchestratorStore.onAutoSpeak(async (sessionId?: string) => {
+    if (!activeProvider.value || !activeModel.value)
+      return
+    const chatProvider = await providersStore.getProviderInstance(activeProvider.value)
+    if (!chatProvider)
+      return
+
+    // ingest()를 통해 sendQueue에 넣어 정상 performSend 파이프라인을 탐
+    // (currentTurnToken 갱신 + onBeforeMessageComposed + LLM 호출까지 순서 보장)
+    await chatOrchestratorStore.ingest('', {
+      model: activeModel.value,
+      chatProvider: chatProvider as any,
+      isAutoSpeak: true,
+      // auto-speak은 유저 메시지가 아니므로 input 미설정
+    }, sessionId)
+  })
+  // ─────────────────────────────────────────────────────────────────────────
 
   const startTrackingCursorPoint = useElectronEventaInvoke(electronStartTrackMousePosition)
   const reportPluginCapability = useElectronEventaInvoke(electronPluginUpdateCapability)

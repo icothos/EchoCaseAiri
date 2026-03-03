@@ -29,6 +29,8 @@ interface SendOptions {
   tools?: StreamOptions['tools']
   input?: WebSocketEventInputs
   promptOptions?: import('./chat/session-store').PromptOptions
+  /** auto-speak 트리거에 의한 호출임을 표시 - 빈 메시지도 LLM 호출을 허용 */
+  isAutoSpeak?: boolean
 }
 
 interface ForkOptions {
@@ -63,9 +65,12 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
   const { streamingMessage } = storeToRefs(chatStream)
 
   const sending = ref(false)
-  const currentSendingSessionId = ref('')  // performSend가 실제로 사용하는 sessionId
+  const currentSendingSessionId = ref('') // performSend가 실제로 사용하는 sessionId
+  const currentTurnToken = ref('') // 현재 터의 식별 토큰 (TTS 완료 후 auto-speak 판정용)
   const pendingQueuedSends = ref<QueuedSend[]>([])
   const hooks = createChatHooks()
+
+  const chatCooldownMs = Number(import.meta.env.VITE_CHAT_COOLDOWN_MS ?? 0)
 
   const sendQueue = createQueue<QueuedSend>({
     handlers: [
@@ -80,13 +85,36 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           return
         }
 
+        // ① 현재 pending 중 같은 sessionId의 나머지 항목 수거해 하나로 병합
+        //    (쏟아진 메시지를 한 번의 LLM 호출로 처리)
+        const pendingForSession = pendingQueuedSends.value.filter(
+          item => item !== data && !item.cancelled && item.sessionId === sessionId,
+        )
+        let finalMessage = sendingMessage
+        if (pendingForSession.length > 0) {
+          const allMessages = [sendingMessage, ...pendingForSession.map(p => p.sendingMessage)]
+            .filter(Boolean)
+          finalMessage = allMessages.length > 1
+            ? allMessages.join('\n')
+            : allMessages[0] ?? ''
+          // 병합된 항목들은 조용히 완료 처리
+          for (const item of pendingForSession) {
+            item.cancelled = true
+            item.deferred.resolve()
+          }
+        }
+
         try {
-          await performSend(sendingMessage, options, generation, sessionId)
+          await performSend(finalMessage, options, generation, sessionId)
           deferred.resolve()
         }
         catch (error) {
           deferred.reject(error)
         }
+
+        // ② LLM 완료 후 cooldown — 다음 큐 항목 처리 전 대기 (VITE_CHAT_COOLDOWN_MS)
+        if (chatCooldownMs > 0)
+          await new Promise<void>(resolve => setTimeout(resolve, chatCooldownMs))
       },
     ],
   })
@@ -105,8 +133,13 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     generation: number,
     sessionId: string,
   ) {
-    if (!sendingMessage && !options.attachments?.length)
+    if (!sendingMessage && !options.attachments?.length && !options.isAutoSpeak)
       return
+
+    // auto-speak 시스템 컨텍스터 메시지 (LLM에게 자율 발화입을 알림)
+    const autoSpeakContext = options.isAutoSpeak
+      ? 'The user has been idle for a while. You may speak up spontaneously if you feel like it. Respond naturally as you would in conversation.'
+      : ''
 
     chatSession.ensureSession(sessionId)
 
@@ -114,9 +147,13 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     chatContext.ingestContextMessage(createDatetimeContext())
 
     const sendingCreatedAt = Date.now()
+    // 터마다 새 turnToken 발급 → 이전 TTS의 scheduleAutoSpeak이 실행되더라도 토큰 불일치로 자동 무효화
+    currentTurnToken.value = nanoid()
+
     const streamingMessageContext: ChatStreamEventContext = {
       sessionId,
-      message: { role: 'user', content: sendingMessage, createdAt: sendingCreatedAt, id: nanoid() },
+      turnToken: currentTurnToken.value,
+      message: { role: 'user', content: sendingMessage || autoSpeakContext, createdAt: sendingCreatedAt, id: nanoid() },
       contexts: chatContext.getContextsSnapshot(),
       composedMessage: [],
       input: options.input,
@@ -347,7 +384,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         toolCalls: sessionMessagesForSend.filter(msg => msg.role === 'tool') as ToolMessage[],
       }, streamingMessageContext)
 
-
       if (isForegroundSession()) {
         streamingMessage.value = { role: 'assistant', content: '', slices: [], tool_results: [] }
       }
@@ -412,6 +448,18 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       : []
   }
 
+  async function scheduleAutoSpeak(token: string, delayMs: number, sessionId?: string) {
+    await new Promise<void>(resolve => setTimeout(resolve, delayMs))
+    // delayMs 후 현재 토큰이 일치하는 경우만 auto-speak 트리거
+    if (currentTurnToken.value === token) {
+      // 발동 전에 토큰을 갱신 → auto-speak이 만든 TTS가 끝나도 재발화 방지 (무한루프 차단)
+      currentTurnToken.value = nanoid()
+      // eslint-disable-next-line no-console
+      console.debug('[chat] auto-speak 트리거 (token 일치)', token.slice(0, 8))
+      await hooks.emitAutoSpeakHooks(sessionId)
+    }
+  }
+
   return {
     sending,
     currentSendingSessionId,
@@ -421,6 +469,8 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     ingest,
     ingestOnFork,
     cancelPendingSends,
+    scheduleAutoSpeak,
+    currentTurnToken,
 
     clearHooks: hooks.clearHooks,
 
@@ -434,6 +484,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     emitAssistantResponseEndHooks: hooks.emitAssistantResponseEndHooks,
     emitAssistantMessageHooks: hooks.emitAssistantMessageHooks,
     emitChatTurnCompleteHooks: hooks.emitChatTurnCompleteHooks,
+    emitAutoSpeakHooks: hooks.emitAutoSpeakHooks,
 
     onBeforeMessageComposed: hooks.onBeforeMessageComposed,
     onAfterMessageComposed: hooks.onAfterMessageComposed,
@@ -444,6 +495,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     onStreamEnd: hooks.onStreamEnd,
     onAssistantResponseEnd: hooks.onAssistantResponseEnd,
     onAssistantMessage: hooks.onAssistantMessage,
+    onAutoSpeak: hooks.onAutoSpeak,
     onChatTurnComplete: hooks.onChatTurnComplete,
   }
 })
