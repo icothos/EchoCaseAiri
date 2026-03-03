@@ -2,7 +2,7 @@
 import type { EchoMemoryInstance } from '@proj-airi/echo-memory'
 
 import { defineInvokeHandler } from '@moeru/eventa'
-import { mountEchoMemory } from '@proj-airi/echo-memory'
+import { createLLMLogger, mountEchoMemory, setGlobalLLMLogger } from '@proj-airi/echo-memory'
 import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { themeColorFromValue, useThemeColor } from '@proj-airi/stage-layouts/composables/theme-color'
 import { ToasterRoot } from '@proj-airi/stage-ui/components'
@@ -121,6 +121,25 @@ onMounted(async () => {
     bouncerBase: import.meta.env.VITE_BOUNCER_BASE_URL,
     geminiKey: import.meta.env.VITE_GEMINI_API_KEY ? 'EXISTS' : 'MISSING',
   })
+
+  // echo-memory LLM 로깅을 llm.log로 연동
+  const echoLogger = createLLMLogger({
+    prefix: '[echo-memory]',
+    onLog: (entry) => {
+      if (typeof (window as any).logLLM === 'function') {
+        const ts = new Date(entry.timestamp).toISOString().slice(11, 23)
+        const dir = entry.direction === 'REQUEST' ? 'REQ' : 'RES'
+        const dur = entry.durationMs !== undefined ? ` (${entry.durationMs}ms)` : ''
+        const model = entry.model ? ` [${entry.model}]` : ''
+        const cleanContent = entry.content.replace(/\r?\n/g, ' ')
+        const preview = entry.inputPreview ? ` | input: ${entry.inputPreview.slice(0, 60).replace(/\r?\n/g, ' ')}` : ''
+        
+        const line = `[echo-memory] ${ts} [${entry.role}]${model} ${dir}${dur}${preview} - ${cleanContent}`
+        ;(window as any).logLLM(line).catch(() => {})
+      }
+    }
+  })
+  setGlobalLLMLogger(echoLogger)
 
   // .env.local에서 설정 읽기. VITE_BOUNCER_BASE_URL 없으면 echo-memory 비활성화
   const bouncerBaseUrl = import.meta.env.VITE_BOUNCER_BASE_URL
