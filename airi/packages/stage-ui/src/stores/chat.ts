@@ -138,12 +138,10 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     sessionId: string,
   ) {
     if (sending.value) {
-      console.warn(`[TRACER] [Chat] performSend aborted: sending.value is TRUE`)
       return
     }
 
     if (!sendingMessage && !options.attachments?.length && !options.isAutoSpeak) {
-      console.warn(`[TRACER] [Chat] performSend aborted: completely empty request`)
       return
     }
 
@@ -169,8 +167,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       composedMessage: [],
       input: options.input,
     }
-
-    console.info(`[Chat Orchestrator] Starting ingest... TurnToken: ${currentTurnToken.value}, isAutoSpeak: ${options.isAutoSpeak}`)
 
     const isStaleGeneration = () => chatSession.getSessionGeneration(sessionId) !== generation
     const shouldAbort = () => isStaleGeneration()
@@ -224,7 +220,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       const isStaleGeneration = () => {
         const currentGeneration = chatSession.getSessionGeneration(sessionId)
         if (currentGeneration !== generation) {
-          console.warn(`[TRACER] [Chat] isStaleGeneration TRUE! current: ${currentGeneration}, orig: ${generation}, isAutoSpeak: ${options.isAutoSpeak}`)
           return true
         }
         return false
@@ -250,10 +245,8 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           }
 
           categorizer.consume(literal)
-
           const speechOnly = categorizer.filterToSpeech(literal, streamPosition)
-          console.info(`[Chat Parser] incoming: "${literal}" -> speech: "${speechOnly}"`)
-          
+
           if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
             (window as any).logTTS(`[${new Date().toISOString()}] [CHAT_CATEGORIZER] literal: "${literal.replace(/\n/g, '\\n')}" -> speechOnly: "${speechOnly.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
           }
@@ -265,7 +258,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           streamPosition += literal.length
 
           if (speechOnly.trim()) {
-            console.warn(`[TRACER] [Chat] filterToSpeech generated: ${speechOnly.length} chars. Emitting hooks...`)
             buildingMessage.content += speechOnly
 
             await hooks.emitTokenLiteralHooks(speechOnly, streamingMessageContext)
@@ -384,7 +376,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         }
       }
 
-      console.info('[Chat] Final newMessages to stream:', JSON.stringify(newMessages, null, 2))
       streamingMessageContext.composedMessage = newMessages as Message[]
 
       await hooks.emitAfterMessageComposedHooks(sendingMessage, streamingMessageContext)
@@ -482,8 +473,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     const generation = chatSession.getSessionGeneration(sessionId)
 
     return new Promise<void>((resolve, reject) => {
-      console.warn(`[TRACER] [Chat Orchestrator] Enqueuing send... sessionId: ${sessionId}, isAutoSpeak: ${options.isAutoSpeak}, msg: ${sendingMessage}`)
-      console.info(`[Chat Orchestrator] Enqueuing send... sessionId: ${sessionId}, isAutoSpeak: ${options.isAutoSpeak}`)
       sendQueue.enqueue({
         sendingMessage,
         options,
@@ -532,8 +521,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     if (currentTurnToken.value === token) {
       // 발동 전에 토큰을 갱신 → auto-speak이 만든 TTS가 끝나도 재발화 방지 (무한루프 차단)
       currentTurnToken.value = nanoid()
-      // eslint-disable-next-line no-console
-      console.debug('[chat] auto-speak 트리거 (token 일치)', token.slice(0, 8))
       await hooks.emitAutoSpeakHooks(sessionId)
     }
   }

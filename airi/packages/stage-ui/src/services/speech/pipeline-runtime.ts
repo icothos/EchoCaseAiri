@@ -164,7 +164,6 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
       priority: priority ?? 0,
       stream,
       writeLiteral(value: string) {
-        console.warn(`[speech-bus] RemoteIntent writeLiteral: "${value}" | closed=${closed}`)
         if (closed)
           return
         write({ type: 'literal', value, streamId, intentId, sequence, createdAt: Date.now() })
@@ -177,7 +176,6 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
         })
       },
       writeSpecial(value: string) {
-        console.warn(`[speech-bus] RemoteIntent writeSpecial: "${value}" | closed=${closed}`)
         if (closed)
           return
         write({ type: 'special', value, streamId, intentId, sequence, createdAt: Date.now() })
@@ -190,7 +188,6 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
         })
       },
       writeFlush() {
-        console.warn(`[speech-bus] RemoteIntent writeFlush | closed=${closed}`)
         if (closed)
           return
         write({ type: 'flush', streamId, intentId, sequence, createdAt: Date.now() })

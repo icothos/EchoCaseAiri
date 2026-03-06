@@ -108,9 +108,6 @@ function createLlmMarkerParser(options?: MarkerParserOptions) {
 
           const emit = buffer.slice(0, closeTagIndex + TAG_CLOSE.length)
           buffer = buffer.slice(closeTagIndex + TAG_CLOSE.length)
-          if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-            (window as any).logTTS(`[${new Date().toISOString()}] [LLM_MARKER] Parsed special token: ${emit}\n`)
-          }
           await onSpecial(emit)
           inTag = false
         }
@@ -131,18 +128,11 @@ function createLlmMarkerStream(input: ReadableStream<string>, options?: MarkerPa
   const parser = createLlmMarkerParser(options)
 
   void readStream(input, async (chunk) => {
-      if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-        (window as any).logTTS(`[${new Date().toISOString()}] [MARKER_INPUT] Chunk received (length: ${chunk.length}): "${chunk.slice(0, 50).replace(/\n/g, '\\n')}"\n`)
-      }
-
     await parser.consume(
       chunk,
       async (literal) => {
         if (!literal)
           return
-          if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-            (window as any).logTTS(`[${new Date().toISOString()}] [MARKER_LITERAL] Emitting Literal (length: ${literal.length})\n`)
-          }
         write({ type: 'literal', value: literal })
       },
       async (special) => {

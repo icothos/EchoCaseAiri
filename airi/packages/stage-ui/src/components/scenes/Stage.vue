@@ -151,14 +151,12 @@ const emotionsQueue = createQueue<EmotionPayload>({
 
 const emotionMessageContentQueue = useEmotionsMessageQueue(emotionsQueue)
 emotionMessageContentQueue.onHandlerEvent('emotion', (emotion) => {
-  // eslint-disable-next-line no-console
-  console.debug('emotion detected', emotion)
+  // ignored logging
 })
 
 const delaysQueue = useDelayMessageQueue()
 delaysQueue.onHandlerEvent('delay', (delay) => {
-  // eslint-disable-next-line no-console
-  console.debug('delay detected', delay)
+  // ignored logging
 })
 
 // Play special token: delay or emotion
@@ -249,7 +247,6 @@ const playbackManager = createPlaybackManager<AudioBuffer>({
 const speechPipeline = createSpeechPipeline<AudioBuffer>({
   tts: async (request, signal) => {
     if (signal.aborted) {
-      console.info(`[Speech Pipeline] tts aborted (request: ${request.text?.slice(0, 30)}...)`)
       return null
     }
 
@@ -265,11 +262,9 @@ const speechPipeline = createSpeechPipeline<AudioBuffer>({
     }
 
     if (!request.text && !request.special) {
-      console.info('[Speech Pipeline] Empty request text and special')
       return null
     }
 
-    console.warn(`[TRACER] [Speech Pipeline] Generating TTS for: ${request.text?.slice(0, 30)} (is special: ${!!request.special})`)
     const providerConfig = providersStore.getProviderConfig(activeSpeechProvider.value)
 
     // For OpenAI Compatible providers, always use provider config for model and voice
@@ -543,7 +538,6 @@ chatHookCleanups.push(onAssistantResponseEnd(async (_message, context) => {
   currentChatIntent.value?.end()
   currentChatIntent.value = null
 
-  console.warn(`[TRACER] [Stage] onAssistantResponseEnd. waiting: ${playbackManager.getWaitingCount()}, nowSpeaking: ${nowSpeaking.value}, isProcessing: ${speechRuntimeStore.isProcessing()}, activeCount: ${speechRuntimeStore.getActiveCount()}`)
   // 예전에는 여기서 Auto-Speak을 초기 호출했으나 유저 요청으로 오직 오디오 재생이 끝난 시점 (playbackManager.onEnd) 에서만 스케줄합니다.
 }))
 
@@ -568,13 +562,10 @@ function tryScheduleAutoSpeak(token: string | undefined, sessionId: string | und
     const isProcessing = speechRuntimeStore.isProcessing()
     if (!isSending && !isProcessing && activePlaybackCount === 0 && waitingPlaybackCount === 0) {
       isAutoSpeakScheduled = true
-      console.debug(`${debugReason} - auto-speak 스케줄 (token: ${token.slice(0, 8)})`)
 
       void chatOrchestrator.scheduleAutoSpeak(token, Number(import.meta.env.VITE_AUTO_SPEAK_IDLE_MS ?? 5_000), sessionId).finally(() => {
         isAutoSpeakScheduled = false
       })
-    } else {
-      console.debug(`[Stage] tryScheduleAutoSpeak 조건 미충족. 취소됨. (sending:${isSending}, act:${activePlaybackCount}, wait:${waitingPlaybackCount})`)
     }
   }, 150)
 }
