@@ -120,6 +120,12 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
           // - https://chromestatus.com/feature/6265472244514816
           // - https://developer.mozilla.org/en-US/docs/Web/API/SharedWorker
           // - https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API
+          // fallback to URL mapping to block duplicate ingestions in Electron multi-window mode
+          if (typeof window !== 'undefined' && window.location.hash.includes('/chat')) {
+            console.debug('[context-bridge] Ignoring input:text in child chat window to prevent duplicate intent.')
+            return
+          }
+
           navigator.locks.request('context-bridge:event:input:text', async () => {
             try {
               await chatOrchestrator.ingest(messageText, {

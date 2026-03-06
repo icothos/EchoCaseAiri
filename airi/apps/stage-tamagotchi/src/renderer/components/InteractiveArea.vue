@@ -129,12 +129,7 @@ onMounted(async () => {
 let isAutoSpeakHandling = false
 chatOrchestrator.onAutoSpeak(async (sessionId?: string) => {
   if (isAutoSpeakHandling) return
-  // Prevent duplicate ingestions if InteractiveArea is mounted in multiple windows
-  // In Electron, pathname might be `/index.html` and router uses hash (`#/chat`)
-  if (window.location.hash.includes('/chat')) {
-    console.debug('[AutoSpeak] Ignoring auto-speak in child chat window to prevent duplicate intent.', sessionId)
-    return
-  }
+  // Removed erroneous hash check that disabled AutoSpeak completely
 
   isAutoSpeakHandling = true
 

@@ -391,7 +391,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       console.info('[Chat] Final newMessages to stream:', JSON.stringify(newMessages, null, 2))
       streamingMessageContext.composedMessage = newMessages as Message[]
 
-      await hooks.emitBeforeMessageComposedHooks(sendingMessage, streamingMessageContext)
       await hooks.emitAfterMessageComposedHooks(sendingMessage, streamingMessageContext)
       await hooks.emitBeforeSendHooks(sendingMessage, streamingMessageContext)
 
