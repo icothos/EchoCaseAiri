@@ -8,7 +8,6 @@ import { setupEchoMemory } from '@proj-airi/stage-ui/utils'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatMaintenanceStore } from '@proj-airi/stage-ui/stores/chat/maintenance'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
-import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { BasicTextarea } from '@proj-airi/ui'
@@ -23,7 +22,6 @@ const attachments = ref<{ type: 'image', data: string, mimeType: string, url: st
 
 const chatOrchestrator = useChatOrchestratorStore()
 const chatSession = useChatSessionStore()
-const serverChannelStore = useModsServerChannelStore()
 const { cleanupMessages } = useChatMaintenanceStore()
 const { ingest, onAfterMessageComposed, discoverToolsCompatibility } = chatOrchestrator
 const { messages } = storeToRefs(chatSession)

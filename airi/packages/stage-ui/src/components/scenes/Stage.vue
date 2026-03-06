@@ -150,12 +150,12 @@ const emotionsQueue = createQueue<EmotionPayload>({
 })
 
 const emotionMessageContentQueue = useEmotionsMessageQueue(emotionsQueue)
-emotionMessageContentQueue.onHandlerEvent('emotion', (emotion) => {
+emotionMessageContentQueue.onHandlerEvent('emotion', (_emotion) => {
   // ignored logging
 })
 
 const delaysQueue = useDelayMessageQueue()
-delaysQueue.onHandlerEvent('delay', (delay) => {
+delaysQueue.onHandlerEvent('delay', (_delay) => {
   // ignored logging
 })
 
@@ -371,7 +371,7 @@ speechPipeline.on('onSpecial', (segment) => {
     playSpecialToken(segment.special)
 })
 
-speechPipeline.on('onIntentEnd', (intentId) => {
+speechPipeline.on('onIntentEnd', (_intentId) => {
   // TTS 다운로드 파이프라인이 하나의 Intent를 완전히 완료했을 때.
   // 이전에 여기서 Auto-Speak을 콜했으나 사용자의 요청으로 제거됨.
 })
@@ -534,7 +534,7 @@ chatHookCleanups.push(onStreamEnd(async () => {
   delaysQueue.enqueue(llmInferenceEndToken)
 }))
 
-chatHookCleanups.push(onAssistantResponseEnd(async (_message, context) => {
+chatHookCleanups.push(onAssistantResponseEnd(async (_message, _context) => {
   currentChatIntent.value?.end()
   currentChatIntent.value = null
 
@@ -543,7 +543,7 @@ chatHookCleanups.push(onAssistantResponseEnd(async (_message, context) => {
 
 let isAutoSpeakScheduled = false
 
-function tryScheduleAutoSpeak(token: string | undefined, sessionId: string | undefined, debugReason: string) {
+function tryScheduleAutoSpeak(token: string | undefined, sessionId: string | undefined, _debugReason: string) {
   if (!token) return
 
   // 150ms 딜레이를 주어 WebAudio Event Loop의 micro-task 간극(Gap)을 안전하게 넘깁니다.

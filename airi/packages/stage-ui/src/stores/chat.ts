@@ -309,7 +309,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         ],
       })
 
-      let newMessages = sessionMessagesForSend.map((msg) => {
+      let newMessages: Message[] = sessionMessagesForSend.map((msg) => {
         const { context: _context, id: _id, ...withoutContext } = msg
         const rawMessage = toRaw(withoutContext)
 
@@ -321,7 +321,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           }
         }
 
-        return rawMessage
+        return rawMessage as Message
       })
 
       const contextsSnapshot = chatContext.getContextsSnapshot()
