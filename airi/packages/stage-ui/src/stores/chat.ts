@@ -90,8 +90,9 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
         // ① 현재 pending 중 같은 sessionId의 나머지 항목 수거해 하나로 병합
         //    (쏟아진 메시지를 한 번의 LLM 호출로 처리)
+        const rawData = toRaw(data)
         const pendingForSession = pendingQueuedSends.value.filter(
-          item => item !== data && !item.cancelled && item.sessionId === sessionId,
+          item => toRaw(item) !== rawData && !item.cancelled && item.sessionId === sessionId,
         )
         let finalMessage = sendingMessage
         if (pendingForSession.length > 0) {
@@ -128,7 +129,8 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
   })
 
   sendQueue.on('dequeue', (queuedSend) => {
-    pendingQueuedSends.value = pendingQueuedSends.value.filter(item => item !== queuedSend)
+    const rawQueuedSend = toRaw(queuedSend)
+    pendingQueuedSends.value = pendingQueuedSends.value.filter(item => toRaw(item) !== rawQueuedSend)
   })
 
   async function performSend(
@@ -246,14 +248,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
           categorizer.consume(literal)
           const speechOnly = categorizer.filterToSpeech(literal, streamPosition)
-
-          if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-            (window as any).logTTS(`[${new Date().toISOString()}] [CHAT_CATEGORIZER] literal: "${literal.replace(/\n/g, '\\n')}" -> speechOnly: "${speechOnly.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
-          }
-
-          if (options.isAutoSpeak && speechOnly.trim() === '') {
-            console.warn('[Chat Parser] AutoSpeak emitted token but filterToSpeech returned empty string! Literal:', literal)
-          }
 
           streamPosition += literal.length
 
@@ -390,7 +384,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       }
 
       const promptNode = chatSession.getPromptNode(options.promptOptions) as Message
-      console.info('[Chat] Starting LLM stream for provider:', options.chatProvider)
+
 
       try {
         await llmStore.stream(options.model, options.chatProvider, promptNode, newMessages as Message[], {
@@ -415,9 +409,6 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
                 break
               case 'text-delta':
                 fullText += event.text
-                if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-                  (window as any).logTTS(`[${new Date().toISOString()}] [LLM_STREAM] text-delta: "${event.text.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
-                }
                 await parser.consume(event.text)
                 break
               case 'finish':
