@@ -25,6 +25,9 @@ export function expose() {
       contextBridge.exposeInMainWorld('logChat', (line: string) =>
         ipcRenderer.invoke('log:chat', line),
       )
+      contextBridge.exposeInMainWorld('logTTS', (line: string) =>
+        ipcRenderer.invoke('log:tts', line),
+      )
     }
     catch (error) {
       console.error(error)
@@ -35,6 +38,7 @@ export function expose() {
     window.platform = platform
       ; (window as any).logLLM = (line: string) => ipcRenderer.invoke('log:llm', line)
       ; (window as any).logChat = (line: string) => ipcRenderer.invoke('log:chat', line)
+      ; (window as any).logTTS = (line: string) => ipcRenderer.invoke('log:tts', line)
   }
 }
 

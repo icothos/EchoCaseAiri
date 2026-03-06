@@ -18,6 +18,9 @@ const textareaRef = ref<HTMLTextAreaElement>()
 const textareaHeight = ref('auto')
 
 function onKeyDown(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229)
+    return
+
   if (e.code === 'Enter' && !e.shiftKey) { // just block Enter is enough, Shift+Enter by default generates a newline
     e.preventDefault()
     events('submit', input.value)

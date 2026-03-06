@@ -394,8 +394,10 @@ export function createStreamingCategorizer(
             }
           })
 
-          if (closingOffset === -1)
+          if (closingOffset === -1) {
+            console.warn('[Categorizer] checkIncompleteTag closingOffset === -1, filtering everything returning empty string', { text })
             return '' // Still incomplete, filter everything
+          }
 
           // Return only content after the closing tag
           // The buffer already includes text up to closingOffset (from consume())
@@ -404,7 +406,8 @@ export function createStreamingCategorizer(
           // Re-categorize with the complete tag now in buffer
           categorized = categorizeResponse(buffer, providerId)
         }
-        catch {
+        catch (e) {
+          console.warn('[Categorizer] checkIncompleteTag parsing failed, filtering everything returning empty string', { error: e, text })
           return '' // Parsing failed, filter everything
         }
       }
@@ -449,6 +452,10 @@ export function createStreamingCategorizer(
       if (currentPos < endPosition) {
         const afterStart = currentPos - startPosition
         filtered += text.slice(afterStart)
+      }
+
+      if (filtered.trim() === '') {
+        console.warn('[Categorizer] filterToSpeech dropped all text because it was inside a non-speech segment', { text, overlappingSegments })
       }
 
       return filtered

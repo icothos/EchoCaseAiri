@@ -149,7 +149,13 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
           if (isProcessingRemoteStream)
             return
 
-          broadcastStreamEvent({ type: 'before-compose', message, sessionId: chatSession.activeSessionId, context: structuredClone(toRaw(context)) })
+          try {
+            broadcastStreamEvent({ type: 'before-compose', message, sessionId: chatSession.activeSessionId, context: structuredClone(toRaw(context)) })
+          } catch (err: any) {
+            if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+              (window as any).electron.ipcRenderer.invoke('log:tts', `[${Date.now()}] [CONTEXT_BRIDGE_CRASH] before-compose structuredClone Error: ${err.message}\n`)
+            }
+          }
         }),
         chatOrchestrator.onAfterMessageComposed(async (message, context) => {
           if (isProcessingRemoteStream)
@@ -300,7 +306,6 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
               await chatOrchestrator.emitStreamEndHooks(event.context)
               chatStream.finalizeStream()
               chatOrchestrator.sending = false
-              remoteStreamGuard = null
               break
             case 'assistant-end':
               if (!remoteStreamGuard)
@@ -315,7 +320,11 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
               remoteStreamGuard = null
               break
             case 'auto-speak':
-              await chatOrchestrator.emitAutoSpeakHooks(event.sessionId)
+              // Fire and forget so we don't keep isProcessingRemoteStream locked.
+              // Otherwise, the local ingest triggered by auto-speak will have its outbound broadcasts blocked!
+              chatOrchestrator.emitAutoSpeakHooks(event.sessionId).catch((err) => {
+                console.error('[context-bridge] Error during remote auto-speak:', err)
+              })
               break
           }
         }

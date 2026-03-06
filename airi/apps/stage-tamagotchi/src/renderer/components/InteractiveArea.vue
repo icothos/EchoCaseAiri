@@ -4,6 +4,7 @@ import type { ChatProvider } from '@xsai-ext/providers/utils'
 import type { Message } from '@xsai/shared-chat'
 
 import { ChatHistory } from '@proj-airi/stage-ui/components'
+import { setupEchoMemory } from '@proj-airi/stage-ui/utils'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatMaintenanceStore } from '@proj-airi/stage-ui/stores/chat/maintenance'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
@@ -12,7 +13,7 @@ import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consci
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { BasicTextarea } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { widgetsTools } from '../stores/tools/builtin/widgets'
@@ -50,9 +51,6 @@ async function handleSend() {
 
   try {
     const providerConfig = providersStore.getProviderConfig(activeProvider.value)
-    
-    // Broadcast text to server channel so echo-memory Bouncer can intercept it
-    serverChannelStore.send('input:text', { text: textToSend })
 
     await ingest(textToSend, {
       model: activeModel.value,
@@ -122,6 +120,46 @@ onAfterMessageComposed(async () => {
   messageInput.value = ''
   attachments.value.forEach(att => URL.revokeObjectURL(att.url))
   attachments.value = []
+})
+
+onMounted(async () => {
+  await setupEchoMemory()
+})
+
+let isAutoSpeakHandling = false
+chatOrchestrator.onAutoSpeak(async (sessionId?: string) => {
+  if (isAutoSpeakHandling) return
+  // Prevent duplicate ingestions if InteractiveArea is mounted in multiple windows
+  // In Electron, pathname might be `/index.html` and router uses hash (`#/chat`)
+  if (window.location.hash.includes('/chat')) {
+    console.debug('[AutoSpeak] Ignoring auto-speak in child chat window to prevent duplicate intent.', sessionId)
+    return
+  }
+
+  isAutoSpeakHandling = true
+
+  try {
+    if (!activeProvider.value || !activeModel.value) {
+      console.warn('[AutoSpeak] Missing provider or model:', activeProvider.value, activeModel.value)
+      return
+    }
+    const chatProvider = await providersStore.getProviderInstance(activeProvider.value)
+    if (!chatProvider) {
+      console.warn('[AutoSpeak] chatProvider instance not found')
+      return
+    }
+
+    console.debug('[AutoSpeak] Triggering ingest in InteractiveArea ...', sessionId)
+    await chatOrchestrator.ingest('', {
+      model: activeModel.value,
+      chatProvider: chatProvider as any,
+      isAutoSpeak: true,
+    }, sessionId)
+  } finally {
+    setTimeout(() => {
+      isAutoSpeakHandling = false
+    }, 1000)
+  }
 })
 
 const historyMessages = computed(() => messages.value as unknown as ChatHistoryItem[])

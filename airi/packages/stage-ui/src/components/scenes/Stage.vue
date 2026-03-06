@@ -202,6 +202,7 @@ async function playFunction(item: Parameters<Parameters<typeof createPlaybackMan
     }
 
     const stopPlayback = () => {
+      clearTimeout(safetyTimeoutId)
       try {
         source.stop()
         source.disconnect()
@@ -211,6 +212,11 @@ async function playFunction(item: Parameters<Parameters<typeof createPlaybackMan
         currentAudioSource.value = undefined
       resolveOnce()
     }
+
+    // Chrome WebAudio 버그 방어 로직: 매우 짧은 버퍼나 특정 조건에서 onended 이벤트를 삼키는 경우에 대비
+    // 오디오 길이에 500ms 여유를 더해 무조건 정리되도록 강제 타임아웃 설정
+    const safetyTimeoutMs = (item.audio.duration * 1000) + 500
+    const safetyTimeoutId = setTimeout(stopPlayback, safetyTimeoutMs)
 
     if (signal.aborted) {
       stopPlayback()
@@ -242,21 +248,28 @@ const playbackManager = createPlaybackManager<AudioBuffer>({
 
 const speechPipeline = createSpeechPipeline<AudioBuffer>({
   tts: async (request, signal) => {
-    if (signal.aborted)
-      return null
-
-    if (!activeSpeechProvider.value)
-      return null
-
-    const provider = await providersStore.getProviderInstance(activeSpeechProvider.value) as SpeechProviderWithExtraOptions<string, UnElevenLabsOptions>
-    if (!provider) {
-      console.error('Failed to initialize speech provider')
+    if (signal.aborted) {
+      console.info(`[Speech Pipeline] tts aborted (request: ${request.text?.slice(0, 30)}...)`)
       return null
     }
 
-    if (!request.text && !request.special)
+    if (!activeSpeechProvider.value) {
+      console.warn('[Speech Pipeline] No activeSpeechProvider')
       return null
+    }
 
+    const provider = await providersStore.getProviderInstance(activeSpeechProvider.value) as SpeechProviderWithExtraOptions<string, UnElevenLabsOptions>
+    if (!provider) {
+      console.error('[Speech Pipeline] Failed to initialize speech provider')
+      return null
+    }
+
+    if (!request.text && !request.special) {
+      console.info('[Speech Pipeline] Empty request text and special')
+      return null
+    }
+
+    console.warn(`[TRACER] [Speech Pipeline] Generating TTS for: ${request.text?.slice(0, 30)} (is special: ${!!request.special})`)
     const providerConfig = providersStore.getProviderConfig(activeSpeechProvider.value)
 
     // For OpenAI Compatible providers, always use provider config for model and voice
@@ -309,19 +322,44 @@ const speechPipeline = createSpeechPipeline<AudioBuffer>({
       : request.text
 
     try {
-      const res = await generateSpeech({
-        ...provider.speech(model, providerConfig),
-        input,
-        voice: voice.id,
-      })
+      const controller = new AbortController()
 
-      if (signal.aborted || !res || res.byteLength === 0)
-        return null
+      const timeoutId = setTimeout(() => {
+        controller.abort(new Error('TTS timeout'))
+      }, 10000)
 
-      const audioBuffer = await audioContext.decodeAudioData(res)
-      return audioBuffer
+      const onSignalAbort = () => {
+        controller.abort(signal.reason)
+      }
+
+      if (signal.aborted) {
+        onSignalAbort()
+      }
+      else {
+        signal.addEventListener('abort', onSignalAbort, { once: true })
+      }
+
+      try {
+        const res = await generateSpeech({
+          ...provider.speech(model, providerConfig),
+          input,
+          voice: voice.id,
+          signal: controller.signal as any,
+        })
+
+        if (controller.signal.aborted || !res || res.byteLength === 0)
+          return null
+
+        const audioBuffer = await audioContext.decodeAudioData(res)
+        return audioBuffer
+      }
+      finally {
+        clearTimeout(timeoutId)
+        signal.removeEventListener('abort', onSignalAbort)
+      }
     }
-    catch {
+    catch (err) {
+      console.error('[Stage] TTS generateSpeech error:', err)
       return null
     }
   },
@@ -336,6 +374,12 @@ void speechRuntimeStore.registerHost(speechPipeline)
 speechPipeline.on('onSpecial', (segment) => {
   if (segment.special)
     playSpecialToken(segment.special)
+})
+
+speechPipeline.on('onIntentEnd', (intentId) => {
+  // TTS 다운로드 파이프라인이 하나의 Intent를 완전히 완료했을 때, 
+  // 발생할 수 있는 "마지막 TTS 청크가 실패하여 오디오 큐에 안 들어간 경우"를 대비합니다.
+  tryScheduleAutoSpeak(intentId || currentTurnToken.value, undefined, '[Stage] TTS 파이프라인 처리 완료 (오디오 큐가 비어있을 수 있음)')
 })
 
 // onStart: TTS 오디오 재생 시작 시점 → text 포함하여 windows:chat에 started 신호 전송 → 텍스트 표시
@@ -355,15 +399,8 @@ playbackManager.onEnd(({ item }) => {
   nowSpeaking.value = false
   mouthOpenSize.value = 0
 
-  // 마지막 TTS 세그먼트(= 큐가 비어있음) → auto-speak 스케줄
-  if (playbackManager.getWaitingCount() === 0) {
-    const token = item.intentId || currentTurnToken.value
-    if (token) {
-      // eslint-disable-next-line no-console
-      console.debug('[Stage] 마지막 TTS 완료 - auto-speak 스케줄 (token:', token.slice(0, 8), ')')
-      void chatOrchestrator.scheduleAutoSpeak(token, Number(import.meta.env.VITE_AUTO_SPEAK_IDLE_MS ?? 5_000), item.sessionId)
-    }
-  }
+  // 1. TTS 큐가 비어있고, 2. LLM 생성 도중이 아니며, 3. TTS 파이프라인에서 남은 청크 다운로드 처리가 없는 경우에만 auto-speak 스케줄
+  tryScheduleAutoSpeak(item.intentId || currentTurnToken.value, item.sessionId, '[Stage] 마지막 TTS 오디오 재생 완료 및 대기 중인 오디오/처리 없음')
 })
 
 playbackManager.onInterrupt(({ item, reason }) => {
@@ -371,6 +408,17 @@ playbackManager.onInterrupt(({ item, reason }) => {
     const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
     ;(window as any).logChat?.(`[${ts}] [Airi][INTERRUPTED reason=${reason}] ${item.text}`)
   }
+  nowSpeaking.value = false
+  mouthOpenSize.value = 0
+})
+
+playbackManager.onReject(({ item, reason }) => {
+  if (item.text && !item.special) {
+    const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    ;(window as any).logChat?.(`[${ts}] [Airi][REJECTED reason=${reason}] ${item.text}`)
+  }
+  nowSpeaking.value = false
+  mouthOpenSize.value = 0
 })
 
 playbackManager.onStart(({ item }) => {
@@ -434,7 +482,9 @@ function setupAnalyser() {
   }
 }
 
-let currentChatIntent: ReturnType<typeof speechRuntimeStore.openIntent> | null = null
+import { shallowRef } from 'vue'
+
+const currentChatIntent = shallowRef<ReturnType<typeof speechRuntimeStore.openIntent> | null>(null)
 
 chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
   setupAnalyser()
@@ -454,13 +504,13 @@ chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
     console.warn('[Stage] Failed to post present reset (channel may be closed)', { error })
   }
 
-  if (currentChatIntent) {
-    currentChatIntent.cancel('new-message', { keepActive: !hardInterrupt.value })
-    currentChatIntent = null
+  if (currentChatIntent.value) {
+    currentChatIntent.value.cancel('new-message', { keepActive: !hardInterrupt.value })
+    currentChatIntent.value = null
   }
 
   const sessionId = context.sessionId
-  currentChatIntent = speechRuntimeStore.openIntent({
+  currentChatIntent.value = speechRuntimeStore.openIntent({
     ownerId: activeCardId.value,
     sessionId,
     intentId: context.turnToken,
@@ -477,23 +527,96 @@ chatHookCleanups.push(onBeforeSend(async (message) => {
 }))
 
 chatHookCleanups.push(onTokenLiteral(async (literal) => {
-  currentChatIntent?.writeLiteral(literal)
+  try {
+    if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+      (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_LITERAL] Received literal from hook: "${literal}"\n`).catch(() => {})
+    } else if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
+      (window as any).logTTS(`[${new Date().toISOString()}] [STAGE_HOOK_LITERAL] Received literal from hook: "${literal}"\n`).catch((e: any) => console.error(e))
+    }
+  } catch (e) { console.error('[logTTS]', e) }
+  
+  if (!currentChatIntent.value) {
+    try {
+      if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+        (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_ERROR] currentChatIntent is NULL! Literal dropped.\n`).catch(() => {})
+      }
+    } catch {}
+  } else if (typeof currentChatIntent.value.writeLiteral !== 'function') {
+    try {
+      if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+        (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_ERROR] currentChatIntent exists but writeLiteral is MISSING!\n`).catch(() => {})
+      }
+    } catch {}
+  } else {
+    try {
+      if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+        (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_SUCCESS] Firing writeLiteral now!\n`).catch(() => {})
+      }
+    } catch {}
+  }
+  
+  try {
+    currentChatIntent.value?.writeLiteral(literal)
+    if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+      (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_SUCCESS] Fired writeLiteral completely!\n`).catch(() => {})
+    }
+  } catch (err: any) {
+    if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+      (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_CRASH] writeLiteral crashed: ${err.message}\n`).catch(() => {})
+    }
+  }
 }))
 
 chatHookCleanups.push(onTokenSpecial(async (special) => {
   // console.debug('Stage received special token:', special)
-  currentChatIntent?.writeSpecial(special)
+  currentChatIntent.value?.writeSpecial(special)
 }))
 
 chatHookCleanups.push(onStreamEnd(async () => {
+  currentChatIntent.value?.writeFlush()
   delaysQueue.enqueue(llmInferenceEndToken)
-  currentChatIntent?.writeFlush()
 }))
 
-chatHookCleanups.push(onAssistantResponseEnd(async (_message) => {
-  currentChatIntent?.end()
-  currentChatIntent = null
+chatHookCleanups.push(onAssistantResponseEnd(async (_message, context) => {
+  currentChatIntent.value?.end()
+  currentChatIntent.value = null
+
+  console.warn(`[TRACER] [Stage] onAssistantResponseEnd. waiting: ${playbackManager.getWaitingCount()}, nowSpeaking: ${nowSpeaking.value}, isProcessing: ${speechRuntimeStore.isProcessing()}, activeCount: ${speechRuntimeStore.getActiveCount()}`)
+
+  // LLM 응답이 완전히 끝났을 때, 만약 이미 처리 중인 TTS나 재생 중인 오디오가 없다면 여기서 auto-speak를 스케줄합니다.
+  tryScheduleAutoSpeak(context.turnToken || currentTurnToken.value, context.sessionId, '[Stage] LLM 종료 시점에 잔여 TTS/처리 오디오 없음')
 }))
+
+let isAutoSpeakScheduled = false
+
+function tryScheduleAutoSpeak(token: string | undefined, sessionId: string | undefined, debugReason: string) {
+  if (!token) return
+
+  // 150ms 딜레이를 주어 WebAudio Event Loop의 micro-task 간극(Gap)을 안전하게 넘깁니다.
+  // 주의: setTimeout 내부에서 중복 스케줄링을 방지하기 위해 isAutoSpeakScheduled 플래그를 사용합니다.
+  setTimeout(() => {
+    if (isAutoSpeakScheduled) return
+
+    const isSending = chatOrchestrator.sending
+    const activePlaybackCount = speechRuntimeStore.getActiveCount()
+    const waitingPlaybackCount = playbackManager.getWaitingCount()
+
+    // 1. LLM 생성 중이 아니고
+    // 2. TTS 파이프라인 다운로드 중이 아니고 (임시 우회: !isProcessing 제거)
+    // 3. WebAudio 큐에 활성 재생중인 오디오가 없고
+    // 4. WebAudio 큐에 대기중인 항목이 없을 때만 스케줄!
+    if (!isSending && activePlaybackCount === 0 && waitingPlaybackCount === 0) {
+      isAutoSpeakScheduled = true
+      console.debug(`${debugReason} - auto-speak 스케줄 (token: ${token.slice(0, 8)})`)
+
+      void chatOrchestrator.scheduleAutoSpeak(token, Number(import.meta.env.VITE_AUTO_SPEAK_IDLE_MS ?? 5_000), sessionId).finally(() => {
+        isAutoSpeakScheduled = false
+      })
+    } else {
+      console.debug(`[Stage] tryScheduleAutoSpeak 조건 미충족. 취소됨. (sending:${isSending}, act:${activePlaybackCount}, wait:${waitingPlaybackCount})`)
+    }
+  }, 150)
+}
 
 onUnmounted(() => {
   lipSyncStarted.value = false

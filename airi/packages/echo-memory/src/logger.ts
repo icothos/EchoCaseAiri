@@ -6,7 +6,7 @@
 // 로그 포맷: [타임스탬프] [역할] [방향] 내용
 // 파일 저장 없이 console 기반 (브라우저 환경) — 필요 시 파일 핸들러 교체 가능
 
-export type LLMRole = 'MAIN' | 'BOUNCER' | 'SUMMARIZER'
+export type LLMRole = 'MAIN' | 'BOUNCER' | 'SUMMARIZER' | 'CONTEXT' | 'PROGRESS'
 export type LogDirection = 'REQUEST' | 'RESPONSE'
 
 export interface LLMLogEntry {

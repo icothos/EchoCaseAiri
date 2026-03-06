@@ -175,6 +175,7 @@ export function createChatHooks(): ChatHookRegistry {
   }
 
   async function emitTokenLiteralHooks(literal: string, context: ChatStreamEventContext) {
+    console.warn(`[chat-hooks] emitTokenLiteralHooks! Length: ${onTokenLiteralHooks.length} | Literal: "${literal.slice(0, 30)}"`)
     for (const hook of onTokenLiteralHooks)
       await hook(literal, context)
   }

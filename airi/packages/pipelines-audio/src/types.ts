@@ -114,6 +114,8 @@ export interface SpeechPipelineEvents<TAudio> {
   onIntentStart: (intentId: string) => void
   onIntentEnd: (intentId: string) => void
   onIntentCancel: (intentId: string, reason?: string) => void
+  getWaitingCount?: () => number
+  getActiveCount?: () => number
 }
 
 export interface LoggerLike {

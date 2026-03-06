@@ -44,11 +44,11 @@ export async function* chunkTtsInput(
   const iterator = readGraphemeClusters(
     typeof input === 'string'
       ? new ReadableStream({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode(input))
-            controller.close()
-          },
-        }).getReader()
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(input))
+          controller.close()
+        },
+      }).getReader()
       : input,
   )
 
@@ -152,15 +152,27 @@ export async function* chunkTtsInput(
         chunkWordsCount = 0
       }
       else if (flush || hard || chunkWordsCount > maximumWords || yieldCount < boost) {
-        const text = chunk.trim()
-        yield {
-          text,
-          words: chunkWordsCount,
-          reason: flush ? 'flush' : hard ? 'hard' : chunkWordsCount > maximumWords ? 'limit' : 'boost',
+        let text = chunk.trim()
+        // If the chunk consists entirely of punctuation/spaces (e.g. '…', '...!', ' ? '),
+        // do not yield it by itself, as TTS engines (like Edge-TTS) will crash with NoAudioReceived.
+        // Instead, keep it in the buffer to append to the next valid text.
+        const hasWordLike = /[^\s.,!?？！。…⋯～~:：;；《》「」\-_+=\(\)\[\]\{\}\\\/|]/u.test(text)
+
+        if (!hasWordLike && !flush) {
+          buffer = text + value + buffer
+          chunk = ''
+          chunkWordsCount = 0
         }
-        yieldCount++
-        chunk = ''
-        chunkWordsCount = 0
+        else {
+          yield {
+            text,
+            words: chunkWordsCount,
+            reason: flush ? 'flush' : hard ? 'hard' : chunkWordsCount > maximumWords ? 'limit' : 'boost',
+          }
+          yieldCount++
+          chunk = ''
+          chunkWordsCount = 0
+        }
       }
 
       previousValue = value

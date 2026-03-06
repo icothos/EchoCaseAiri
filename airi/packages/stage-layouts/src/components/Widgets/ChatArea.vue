@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { ChatProvider } from '@xsai-ext/providers/utils'
-import type { Message } from '@xsai/shared-chat'
+
 
 import { isStageTamagotchi } from '@proj-airi/stage-shared'
+import { setupEchoMemory } from '@proj-airi/stage-ui/utils'
 import { useAudioAnalyzer } from '@proj-airi/stage-ui/composables'
 import { useAudioContext } from '@proj-airi/stage-ui/stores/audio'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
@@ -14,8 +15,7 @@ import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/
 import { BasicTextarea, FieldSelect } from '@proj-airi/ui'
 import { until } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { TooltipContent, TooltipProvider, TooltipRoot, TooltipTrigger } from 'reka-ui'
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import IndicatorMicVolume from './IndicatorMicVolume.vue'
@@ -37,6 +37,9 @@ const { ingest, onAfterMessageComposed, discoverToolsCompatibility } = chatOrche
 const { messages } = storeToRefs(chatSession)
 const { audioContext } = useAudioContext()
 const { t } = useI18n()
+
+onMounted(async () => {
+})
 
 // Transcription pipeline
 const hearingStore = useHearingStore()
@@ -141,11 +144,46 @@ watch(hearingTooltipOpen, async (value) => {
 
 watch([activeProvider, activeModel], async () => {
   if (activeProvider.value && activeModel.value) {
-    await discoverToolsCompatibility(activeModel.value, await providersStore.getProviderInstance<ChatProvider>(activeProvider.value), [] as Message[], { force: false })
+    await discoverToolsCompatibility(activeModel.value, await providersStore.getProviderInstance<ChatProvider>(activeProvider.value), [] as any[], { force: false })
   }
 })
 
+onMounted(async () => {
+  await setupEchoMemory()
+})
+
 onAfterMessageComposed(async () => {
+})
+
+let isAutoSpeakHandling = false
+chatOrchestrator.onAutoSpeak(async (sessionId?: string) => {
+  // 중복 호출 방지를 위해 잠금장치 설정 (여러 채팅 컴포넌트가 동시에 이벤트를 수신할 때 대비)
+  if (isAutoSpeakHandling) return
+  isAutoSpeakHandling = true
+
+  try {
+    if (!activeProvider.value || !activeModel.value) {
+      console.warn('[AutoSpeak] Missing provider or model:', activeProvider.value, activeModel.value)
+      return
+    }
+    const chatProvider = await providersStore.getProviderInstance(activeProvider.value)
+    if (!chatProvider) {
+      console.warn('[AutoSpeak] chatProvider instance not found')
+      return
+    }
+
+    console.debug('[AutoSpeak] Triggering ingest in ChatArea ...', sessionId)
+    await chatOrchestrator.ingest('', {
+      model: activeModel.value,
+      chatProvider: chatProvider as any,
+      isAutoSpeak: true,
+    }, sessionId)
+  } finally {
+    // LLM ingest 워크플로우로 진입한 후 상태를 잠시 홀드 (동시다발 호출 트리거 방지)
+    setTimeout(() => {
+      isAutoSpeakHandling = false
+    }, 1000)
+  }
 })
 
 const { startAnalyzer, stopAnalyzer, volumeLevel } = useAudioAnalyzer()

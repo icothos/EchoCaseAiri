@@ -77,10 +77,13 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       async ({ data }) => {
         const { sendingMessage, options, generation, deferred, sessionId, cancelled } = data
 
-        if (cancelled)
+        if (cancelled) {
+          console.warn('[Chat] sendQueue cancelled item before processing', sessionId)
           return
+        }
 
         if (chatSession.getSessionGeneration(sessionId) !== generation) {
+          console.warn('[Chat] sendQueue rejected: session generation mismatch', sessionId, generation)
           deferred.reject(new Error('Chat session was reset before send could start'))
           return
         }
@@ -109,6 +112,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           deferred.resolve()
         }
         catch (error) {
+          console.error('[Chat] performSend error inside sendQueue:', error)
           deferred.reject(error)
         }
 
@@ -133,12 +137,19 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     generation: number,
     sessionId: string,
   ) {
-    if (!sendingMessage && !options.attachments?.length && !options.isAutoSpeak)
+    if (sending.value) {
+      console.warn(`[TRACER] [Chat] performSend aborted: sending.value is TRUE`)
       return
+    }
+
+    if (!sendingMessage && !options.attachments?.length && !options.isAutoSpeak) {
+      console.warn(`[TRACER] [Chat] performSend aborted: completely empty request`)
+      return
+    }
 
     // auto-speak 시스템 컨텍스터 메시지 (LLM에게 자율 발화입을 알림)
     const autoSpeakContext = options.isAutoSpeak
-      ? 'The user has been idle for a while. You may speak up spontaneously if you feel like it. Respond naturally as you would in conversation.'
+      ? '[SYSTEM NOTE] The user has been idle for a while. DO NOT repeat your previous response. Say something new, change the topic, or ask a question to re-engage them.'
       : ''
 
     chatSession.ensureSession(sessionId)
@@ -153,11 +164,13 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     const streamingMessageContext: ChatStreamEventContext = {
       sessionId,
       turnToken: currentTurnToken.value,
-      message: { role: 'user', content: sendingMessage || autoSpeakContext, createdAt: sendingCreatedAt, id: nanoid() },
+      message: { role: 'user', content: sendingMessage, createdAt: sendingCreatedAt, id: nanoid() },
       contexts: chatContext.getContextsSnapshot(),
       composedMessage: [],
       input: options.input,
     }
+
+    console.info(`[Chat Orchestrator] Starting ingest... TurnToken: ${currentTurnToken.value}, isAutoSpeak: ${options.isAutoSpeak}`)
 
     const isStaleGeneration = () => chatSession.getSessionGeneration(sessionId) !== generation
     const shouldAbort = () => isStaleGeneration()
@@ -208,6 +221,16 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         }
       }
 
+      const isStaleGeneration = () => {
+        const currentGeneration = chatSession.getSessionGeneration(sessionId)
+        if (currentGeneration !== generation) {
+          console.warn(`[TRACER] [Chat] isStaleGeneration TRUE! current: ${currentGeneration}, orig: ${generation}, isAutoSpeak: ${options.isAutoSpeak}`)
+          return true
+        }
+        return false
+      }
+      const shouldAbort = () => isStaleGeneration()
+
       if (shouldAbort())
         return
 
@@ -222,15 +245,31 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
       const parser = useLlmmarkerParser({
         onLiteral: async (literal) => {
-          if (shouldAbort())
+          if (shouldAbort()) {
             return
+          }
 
           categorizer.consume(literal)
 
           const speechOnly = categorizer.filterToSpeech(literal, streamPosition)
+          console.info(`[Chat Parser] incoming: "${literal}" -> speech: "${speechOnly}"`)
+          
+          try {
+            if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+              (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [CHAT_CATEGORIZER] literal: "${literal.replace(/\n/g, '\\n')}" -> speechOnly: "${speechOnly.replace(/\n/g, '\\n')}"\n`).catch(() => {})
+            } else if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
+              (window as any).logTTS(`[${new Date().toISOString()}] [CHAT_CATEGORIZER] literal: "${literal.replace(/\n/g, '\\n')}" -> speechOnly: "${speechOnly.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
+            }
+          } catch (e) { console.error('[logTTS]', e) }
+
+          if (options.isAutoSpeak && speechOnly.trim() === '') {
+            console.warn('[Chat Parser] AutoSpeak emitted token but filterToSpeech returned empty string! Literal:', literal)
+          }
+
           streamPosition += literal.length
 
           if (speechOnly.trim()) {
+            console.warn(`[TRACER] [Chat] filterToSpeech generated: ${speechOnly.length} chars. Emitting hooks...`)
             buildingMessage.content += speechOnly
 
             await hooks.emitTokenLiteralHooks(speechOnly, streamingMessageContext)
@@ -326,55 +365,101 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         ]
       }
 
+      if (options.isAutoSpeak && autoSpeakContext && newMessages.length > 0) {
+        let lastMsg = newMessages[newMessages.length - 1]
+
+        // If the last message is NOT a user message (e.g. assistant), force append a new user message for context
+        if (lastMsg.role !== 'user') {
+          console.info('[Chat] Last message is not user; appending new user message for AutoSpeak context')
+          newMessages.push({ role: 'user', content: '' } as unknown as Message)
+          lastMsg = newMessages[newMessages.length - 1]
+        }
+
+        const isContentEmpty = !lastMsg.content
+          || lastMsg.content === ''
+          || (Array.isArray(lastMsg.content) && lastMsg.content.length === 1 && lastMsg.content[0]?.type === 'text' && lastMsg.content[0].text === '')
+          || (Array.isArray(lastMsg.content) && lastMsg.content.length === 0)
+
+        if (isContentEmpty) {
+          lastMsg.content = autoSpeakContext
+          console.info('[Chat] Successfully injected isAutoSpeak context into lastMsg')
+        } else {
+          console.warn('[Chat] Failed to inject AutoSpeak: content was not empty!', lastMsg.content)
+        }
+      }
+
+      console.info('[Chat] Final newMessages to stream:', JSON.stringify(newMessages, null, 2))
       streamingMessageContext.composedMessage = newMessages as Message[]
 
+      await hooks.emitBeforeMessageComposedHooks(sendingMessage, streamingMessageContext)
       await hooks.emitAfterMessageComposedHooks(sendingMessage, streamingMessageContext)
       await hooks.emitBeforeSendHooks(sendingMessage, streamingMessageContext)
 
       let fullText = ''
       const headers = (options.providerConfig?.headers || {}) as Record<string, string>
 
-      if (shouldAbort())
+      if (shouldAbort()) {
+        console.warn('[Chat] Aborted before LLM stream (stale generation)')
         return
+      }
 
       const promptNode = chatSession.getPromptNode(options.promptOptions) as Message
+      console.info('[Chat] Starting LLM stream for provider:', options.chatProvider)
 
-      await llmStore.stream(options.model, options.chatProvider, promptNode, newMessages as Message[], {
-        headers,
-        tools: options.tools,
-        onStreamEvent: async (event: StreamEvent) => {
-          switch (event.type) {
-            case 'tool-call':
-              toolCallQueue.enqueue({
-                type: 'tool-call',
-                toolCall: event,
-              })
+      try {
+        await llmStore.stream(options.model, options.chatProvider, promptNode, newMessages as Message[], {
+          headers,
+          tools: options.tools,
+          onStreamEvent: async (event: StreamEvent) => {
+            switch (event.type) {
+              case 'tool-call':
+                toolCallQueue.enqueue({
+                  type: 'tool-call',
+                  toolCall: event,
+                })
 
-              break
-            case 'tool-result':
-              toolCallQueue.enqueue({
-                type: 'tool-call-result',
-                id: event.toolCallId,
-                result: event.result,
-              })
+                break
+              case 'tool-result':
+                toolCallQueue.enqueue({
+                  type: 'tool-call-result',
+                  id: event.toolCallId,
+                  result: event.result,
+                })
 
-              break
-            case 'text-delta':
-              fullText += event.text
-              await parser.consume(event.text)
-              break
-            case 'finish':
-              break
-            case 'error':
-              throw event.error ?? new Error('Stream error')
-          }
-        },
-      })
+                break
+              case 'text-delta':
+                fullText += event.text
+                try {
+                  if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+                    (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [LLM_STREAM] text-delta: "${event.text.replace(/\n/g, '\\n')}"\n`).catch(() => {})
+                  } else if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
+                    (window as any).logTTS(`[${new Date().toISOString()}] [LLM_STREAM] text-delta: "${event.text.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
+                  }
+                } catch (e) { console.error('[logTTS]', e) }
+                await parser.consume(event.text)
+                break
+              case 'finish':
+                break
+              case 'error':
+                throw event.error ?? new Error('Stream error')
+            }
+          },
+        })
+      }
+      finally {
+        // ALWAYS flush remaining parser buffers (specifically sentences <24 chars) to the TTS intent.
+        // And ensure the intent is properly ended so `isProcessing` doesn't leak forever.
+        try {
+          await parser.end()
+          await hooks.emitStreamEndHooks(streamingMessageContext)
+          await hooks.emitAssistantResponseEndHooks(fullText, streamingMessageContext)
+        }
+        catch (finalizeError) {
+          console.warn('[Chat] Error while finalizing stream processing:', finalizeError)
+        }
+      }
 
-      await parser.end()
 
-      await hooks.emitStreamEndHooks(streamingMessageContext)
-      await hooks.emitAssistantResponseEndHooks(fullText, streamingMessageContext)
 
       await hooks.emitAfterSendHooks(sendingMessage, streamingMessageContext)
       await hooks.emitAssistantMessageHooks({ ...buildingMessage }, fullText, streamingMessageContext)
@@ -406,6 +491,8 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     const generation = chatSession.getSessionGeneration(sessionId)
 
     return new Promise<void>((resolve, reject) => {
+      console.warn(`[TRACER] [Chat Orchestrator] Enqueuing send... sessionId: ${sessionId}, isAutoSpeak: ${options.isAutoSpeak}, msg: ${sendingMessage}`)
+      console.info(`[Chat Orchestrator] Enqueuing send... sessionId: ${sessionId}, isAutoSpeak: ${options.isAutoSpeak}`)
       sendQueue.enqueue({
         sendingMessage,
         options,

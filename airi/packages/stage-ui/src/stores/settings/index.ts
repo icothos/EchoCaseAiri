@@ -13,6 +13,7 @@ export * from './general'
 export * from './live2d'
 export * from './stage-model'
 export * from './theme'
+export * from './bouncer'
 // Export constants
 export { DEFAULT_THEME_COLORS_HUE } from './theme'
 

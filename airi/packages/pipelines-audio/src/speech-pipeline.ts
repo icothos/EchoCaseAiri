@@ -33,6 +33,7 @@ export interface SpeechPipelineOptions<TAudio> {
     onInterrupt: (listener: (event: { item: PlaybackItem<TAudio>, reason: string, interruptedAt: number }) => void) => void
     onReject: (listener: (event: { item: PlaybackItem<TAudio>, reason: string }) => void) => void
     getWaitingCount?: () => number
+    getActiveCount?: () => number
   }
   logger?: LoggerLike
   priority?: ReturnType<typeof createPriorityResolver>
@@ -55,6 +56,27 @@ interface IntentState {
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function writeTtsDebugLog(intentId: string, event: string, details: string) {
+  const time = new Date().toISOString()
+  const logLine = `[${time}] [Intent: ${intentId.slice(0, 8)}] [${event}] ${details}\n`
+  try {
+    // Try explicit IPC if available
+    if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
+      (window as any).electron.ipcRenderer.invoke('log:tts', logLine.trim()).catch(() => {})
+      return
+    }
+    // Try exposed contextBridge
+    if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
+      ;(window as any).logTTS(logLine.trim()).catch((e: any) => console.error('[logTTS IPC Error]', e))
+      return
+    }
+  } catch (e) {
+    console.error('[writeTtsDebugLog] Synchronous error calling window.logTTS:', e)
+  }
+  // Fallback to console
+  console.log(`[TTS DEBUG] ${logLine.trim()}`)
 }
 
 export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAudio>) {
@@ -85,6 +107,8 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
 
   async function runIntent(intent: IntentState) {
     activeIntent = intent
+    console.warn(`[speech-pipeline] runIntent START! IntentId: ${intent.intentId}, Behavior: ${intent.behavior}`)
+    writeTtsDebugLog(intent.intentId, 'START', `Priority: ${intent.priority}, Behavior: ${intent.behavior}`)
     context.emit(speechPipelineEventMap.onIntentStart, intent.intentId)
 
     const tokenStream = intent.stream
@@ -104,9 +128,13 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
           break
         }
 
+        console.warn(`[speech-pipeline] SEGMENT received: "${value.text.slice(0, 30)}" | Special: ${value.special}`)
         context.emit(speechPipelineEventMap.onSegment, value)
+        writeTtsDebugLog(intent.intentId, 'SEGMENT', `Text: "${value.text.slice(0, 30)}" | Special: ${value.special}`)
 
         if (value.text === '' && value.special) {
+          console.warn(`[speech-pipeline] SPECIAL_ONLY: ${value.special}`)
+          writeTtsDebugLog(intent.intentId, 'SPECIAL_ONLY', `Skipping TTS, special only: ${value.special}`)
           context.emit(speechPipelineEventMap.onSpecial, value)
           continue
         }
@@ -124,10 +152,19 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
         context.emit(speechPipelineEventMap.onTtsRequest, request)
 
         if (options.playback.getWaitingCount) {
+          const waitStart = Date.now()
+          let waiting = false
           while (options.playback.getWaitingCount() >= 2) {
+            if (!waiting) {
+              writeTtsDebugLog(intent.intentId, 'WAIT_QUEUE', `Playback queue >= 2, throttling TTS...`)
+              waiting = true
+            }
             if (intent.canceled || intent.controller.signal.aborted)
               break
             await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          if (waiting) {
+            writeTtsDebugLog(intent.intentId, 'RESUME_QUEUE', `Wait resolved after ${Date.now() - waitStart}ms`)
           }
         }
 
@@ -136,20 +173,31 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
 
         let audio: TAudio | null = null
         try {
+          writeTtsDebugLog(intent.intentId, 'TTS_REQ', `Requesting API: "${request.text.slice(0, 30)}..."`)
+          console.warn(`[Speech Pipeline] Starting TTS for request: "${request.text.slice(0, 30)}..." [intent: ${intent.intentId.slice(0, 6)}]`)
+          const ttsStart = Date.now()
           audio = await options.tts(request, intent.controller.signal)
+          writeTtsDebugLog(intent.intentId, 'TTS_RES', `Audio received (${Date.now() - ttsStart}ms), isNull=${!audio}`)
+          console.warn(`[Speech Pipeline] TTS Success audio length: ${audio ? 'OK' : 'NULL'} [intent: ${intent.intentId.slice(0, 6)}]`)
         }
         catch (err) {
+          writeTtsDebugLog(intent.intentId, 'TTS_FAIL', `TTS Generation Failed: ${err}`)
           logger.warn('TTS generation failed:', err)
           if (intent.controller.signal.aborted)
             break
           continue
         }
 
-        if (intent.controller.signal.aborted)
+        if (intent.controller.signal.aborted) {
+          writeTtsDebugLog(intent.intentId, 'TTS_ABORT', `Discarding chunk: "${request.text.slice(0, 30)}..."`)
+          console.warn(`[Speech Pipeline] TTS Aborted! discarding chunk: "${request.text.slice(0, 30)}..." [intent: ${intent.intentId.slice(0, 6)}]`)
           break
+        }
 
-        if (!audio)
+        if (!audio) {
+          writeTtsDebugLog(intent.intentId, 'TTS_SKIP', `Audio was null for: "${request.text.slice(0, 30)}..."`)
           continue
+        }
 
         const ttsResult: TtsResult<TAudio> = {
           streamId: request.streamId,
@@ -163,6 +211,7 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
 
         context.emit(speechPipelineEventMap.onTtsResult, ttsResult)
 
+        writeTtsDebugLog(intent.intentId, 'SCHEDULE', `Queuing playback: "${ttsResult.text.slice(0, 30)}..."`)
         options.playback.schedule({
           id: createId('playback'),
           streamId: ttsResult.streamId,
@@ -185,9 +234,11 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
     }
     finally {
       if (intent.canceled) {
+        writeTtsDebugLog(intent.intentId, 'CANCEL', `Reason: ${intent.controller.signal.reason as string | undefined}`)
         context.emit(speechPipelineEventMap.onIntentCancel, { intentId: intent.intentId, reason: intent.controller.signal.reason as string | undefined })
       }
       else {
+        writeTtsDebugLog(intent.intentId, 'END', 'Intent fully generated and scheduled.')
         context.emit(speechPipelineEventMap.onIntentEnd, intent.intentId)
       }
 
@@ -235,6 +286,8 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
       ownerId,
       stream,
       writeLiteral(text: string) {
+        console.warn(`[speech-pipeline] writeLiteral called: "${text}" | canceled=${intent.canceled}`)
+        writeTtsDebugLog(intentId, 'HOOK_WRITE_LITERAL', `Received: "${text.slice(0, 30)}" | Canceled=${intent.canceled}`)
         if (intent.canceled)
           return
         write({
@@ -247,6 +300,8 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
         })
       },
       writeSpecial(special: string) {
+        console.warn(`[speech-pipeline] writeSpecial called: "${special}" | canceled=${intent.canceled}`)
+        writeTtsDebugLog(intentId, 'HOOK_WRITE_SPECIAL', `Received: "${special}" | Canceled=${intent.canceled}`)
         if (intent.canceled)
           return
         write({
@@ -259,6 +314,8 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
         })
       },
       writeFlush() {
+        console.warn(`[speech-pipeline] writeFlush called! canceled=${intent.canceled}`)
+        writeTtsDebugLog(intentId, 'HOOK_WRITE_FLUSH', `Flushing stream | Canceled=${intent.canceled}`)
         if (intent.canceled)
           return
         write({
@@ -318,6 +375,9 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
     const index = pending.findIndex(item => item.intentId === intentId)
     if (index >= 0)
       pending.splice(index, 1)
+
+    intents.delete(intentId)
+    context.emit(speechPipelineEventMap.onIntentCancel, { intentId, reason: reason ?? 'canceled' })
   }
 
   function interrupt(reason: string) {
@@ -342,6 +402,8 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
     cancelIntent,
     interrupt,
     stopAll,
+    isProcessing: () => intents.size > 0 || activeIntent !== null,
+    getActiveCount: () => options.playback.getActiveCount ? options.playback.getActiveCount() : 0,
     on<K extends SpeechPipelineEventName>(event: K, listener: SpeechPipelineEvents<TAudio>[K]) {
       return context.on(speechPipelineEventMap[event] as Eventa<any>, (payload) => {
         listener(payload?.body ?? payload)

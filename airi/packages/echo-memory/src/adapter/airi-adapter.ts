@@ -51,12 +51,9 @@ function isDuplicate(text: string): boolean {
  * @param options  EchoMemoryOptions
  */
 export function mountEchoMemory(
-    serverChannelStore: {
-        onEvent: (eventType: string, handler: (event: any) => void | Promise<void>) => () => void
-    },
     chatOrchestratorStore: {
-        onBeforeMessageComposed: (handler: (...args: any[]) => void | Promise<void>) => () => void
-        onChatTurnComplete: (handler: (chat: { output: any, outputText: string, toolCalls: any[] }, ...rest: any[]) => void | Promise<void>) => () => void
+        onBeforeMessageComposed: (handler: any) => () => void
+        onChatTurnComplete: (handler: any) => () => void
     },
     chatContextStore: {
         ingestContextMessage: (msg: any) => void
@@ -82,7 +79,7 @@ export function mountEchoMemory(
 
     // ② Hot Context 주입 및 Bouncer: LLM 호출 직전
     // (Bouncer가 await 되어야 메인 LLM이 기다려 줌)
-    cleanups.push(chatOrchestratorStore.onBeforeMessageComposed(async (messageText) => {
+    cleanups.push(chatOrchestratorStore.onBeforeMessageComposed(async (messageText: string | null | undefined) => {
         // Bouncer 처리
         const text: string = messageText ?? ''
 
@@ -122,7 +119,7 @@ export function mountEchoMemory(
     }))
 
     // ③ AI 응답 완료 후: Progress 업데이트 + Summarizer 트리거 + autoSpeak 타이머 리셋
-    cleanups.push(chatOrchestratorStore.onChatTurnComplete(async ({ outputText }) => {
+    cleanups.push(chatOrchestratorStore.onChatTurnComplete(async ({ outputText }: { outputText: string }) => {
         summarizer.addMessage('assistant', outputText)
 
         const topNode = pool.getTopK(1).find(n => n.nodeType === 'context_summary')

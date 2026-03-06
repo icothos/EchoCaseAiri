@@ -32,6 +32,7 @@
     "@moeru/eventa": "^1.0.0-beta.1",
     "@moeru/std": "catalog:",
     "@proj-airi/ccc": "workspace:*",
+    "@proj-airi/echo-memory": "workspace:*",
     "@proj-airi/i18n": "workspace:*",
     "@proj-airi/server-sdk": "workspace:*",
     "@proj-airi/stage-ui": "workspace:*",

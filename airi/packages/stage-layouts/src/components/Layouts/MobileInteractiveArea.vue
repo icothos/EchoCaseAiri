@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { ChatHistoryItem } from '@proj-airi/stage-ui/types/chat'
 import type { ChatProvider } from '@xsai-ext/providers/utils'
-import type { Message } from '@xsai/shared-chat'
+
 
 import { ChatHistory, HearingConfigDialog } from '@proj-airi/stage-ui/components'
+import { setupEchoMemory } from '@proj-airi/stage-ui/utils'
 import { useAudioAnalyzer } from '@proj-airi/stage-ui/composables'
 import { useAudioContext } from '@proj-airi/stage-ui/stores/audio'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
@@ -131,9 +132,35 @@ watch(hearingDialogOpen, (value) => {
 onAfterMessageComposed(async () => {
 })
 
+onMounted(async () => {
+  await setupEchoMemory()
+})
+
+let isAutoSpeakHandling = false
+chatOrchestrator.onAutoSpeak(async (sessionId?: string) => {
+  if (isAutoSpeakHandling) return
+  isAutoSpeakHandling = true
+
+  try {
+    if (!activeProvider.value || !activeModel.value) return
+    const chatProvider = await providersStore.getProviderInstance(activeProvider.value)
+    if (!chatProvider) return
+
+    await chatOrchestrator.ingest('', {
+      model: activeModel.value,
+      chatProvider: chatProvider as any,
+      isAutoSpeak: true,
+    }, sessionId)
+  } finally {
+    setTimeout(() => {
+      isAutoSpeakHandling = false
+    }, 1000)
+  }
+})
+
 watch([activeProvider, activeModel], async () => {
   if (activeProvider.value && activeModel.value) {
-    await discoverToolsCompatibility(activeModel.value, await providersStore.getProviderInstance<ChatProvider>(activeProvider.value), [] as Message[], { force: false })
+    await discoverToolsCompatibility(activeModel.value, await providersStore.getProviderInstance<ChatProvider>(activeProvider.value), [] as any[], { force: false })
   }
 })
 

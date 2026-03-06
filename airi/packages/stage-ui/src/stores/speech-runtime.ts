@@ -17,6 +17,14 @@ export const useSpeechRuntimeStore = defineStore('speech-runtime', () => {
     return runtime.isHost()
   }
 
+  function isProcessing() {
+    return runtime.isProcessing()
+  }
+
+  function getActiveCount() {
+    return runtime.getActiveCount()
+  }
+
   async function dispose() {
     await runtime.dispose()
   }
@@ -25,6 +33,8 @@ export const useSpeechRuntimeStore = defineStore('speech-runtime', () => {
     openIntent,
     registerHost,
     isHost,
+    isProcessing,
+    getActiveCount,
     dispose,
   }
 })

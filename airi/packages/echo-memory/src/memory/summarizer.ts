@@ -58,7 +58,7 @@ export function createSummarizer(
     const pendingChunks: ChatMessage[][] = []
 
     async function callSummarizer(chatLog: string): Promise<SummarizerResult | null> {
-        const startedAt = logger.request('SUMMARIZER', chatLog.slice(0, 200), model, chatLog.slice(0, 60))
+        const startedAt = logger.request('CONTEXT', chatLog.slice(0, 200), model, chatLog.slice(0, 60))
 
         try {
             let raw: string
@@ -106,7 +106,7 @@ export function createSummarizer(
                 }
             }
 
-            logger.response('SUMMARIZER', raw, startedAt, model)
+            logger.response('CONTEXT', raw, startedAt, model)
             if (raw.startsWith('```json'))
                 raw = raw.slice(7)
             if (raw.endsWith('```'))
@@ -208,7 +208,6 @@ export function createSummarizer(
         if (!aiResponse.trim())
             return null
 
-        const url = `${progressBaseUrl.replace(/\/$/, '')}/v1/chat/completions`
         const systemPrompt = `IMPORTANT: Respond ONLY in Korean. One sentence only. No explanation.
 You are tracking the conversation progress of a VTuber livestream.
 Read the AI streamer's latest response and summarize:
@@ -221,18 +220,7 @@ Output: a single Korean sentence (20-40 chars). Example output: "게임 공략 �
             ? `맥락: ${contextSummary}\n\nAI 응답:\n${aiResponse.slice(0, 600)}`
             : `AI 응답:\n${aiResponse.slice(0, 600)}`
 
-        const body = JSON.stringify({
-            model: progressModel,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt },
-            ],
-            temperature: 0.2,
-            max_tokens: 80,
-            stream: false,
-        })
-
-        const startedAt = logger.request('SUMMARIZER', userPrompt.slice(0, 100), progressModel, aiResponse.slice(0, 60))
+        const startedAt = logger.request('PROGRESS', userPrompt.slice(0, 100), progressModel, aiResponse.slice(0, 60))
 
         try {
             let raw: string
@@ -280,7 +268,7 @@ Output: a single Korean sentence (20-40 chars). Example output: "게임 공략 �
                 }
             }
 
-            logger.response('SUMMARIZER', raw, startedAt, progressModel)
+            logger.response('PROGRESS', raw, startedAt, progressModel)
             return raw || null
         }
         catch (err) {

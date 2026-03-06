@@ -1,27 +1,23 @@
 <script setup lang="ts">
-import type { EchoMemoryInstance } from '@proj-airi/echo-memory'
-
 import { defineInvokeHandler } from '@moeru/eventa'
-import { createLLMLogger, mountEchoMemory, setGlobalLLMLogger } from '@proj-airi/echo-memory'
 import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { themeColorFromValue, useThemeColor } from '@proj-airi/stage-layouts/composables/theme-color'
 import { ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useSharedAnalyticsStore } from '@proj-airi/stage-ui/stores/analytics'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
-import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
-import { useChatContextStore } from '@proj-airi/stage-ui/stores/chat/context-store'
+
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { usePluginHostInspectorStore } from '@proj-airi/stage-ui/stores/devtools/plugin-host-debug'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/context-bridge'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
-import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
 import { usePerfTracerBridgeStore } from '@proj-airi/stage-ui/stores/perf-tracer-bridge'
 import { listProvidersForPluginHost, shouldPublishPluginHostCapabilities } from '@proj-airi/stage-ui/stores/plugin-host-capabilities'
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
+import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useTheme } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { onMounted, onUnmounted, watch } from 'vue'
@@ -60,17 +56,12 @@ const route = useRoute()
 const cardStore = useAiriCardStore()
 const chatSessionStore = useChatSessionStore()
 const serverChannelStore = useModsServerChannelStore()
-const chatOrchestratorStore = useChatOrchestratorStore()
-const chatContextStore = useChatContextStore()
 const characterOrchestratorStore = useCharacterOrchestratorStore()
-const consciousnessStore = useConsciousnessStore()
-const { activeProvider, activeModel } = storeToRefs(consciousnessStore)
-const providersStore = useProvidersStore()
 const analyticsStore = useSharedAnalyticsStore()
 const pluginHostInspectorStore = usePluginHostInspectorStore()
+useConsciousnessStore()
+useProvidersStore()
 usePerfTracerBridgeStore()
-
-let echoMemory: EchoMemoryInstance | null = null
 
 watch(language, () => {
   i18n.locale.value = language.value
@@ -112,124 +103,12 @@ onMounted(async () => {
   const serverChannelConfig = await getServerChannelConfig()
   serverChannelSettingsStore.websocketTlsConfig = serverChannelConfig.websocketTlsConfig
 
-  await serverChannelStore.initialize({ possibleEvents: ['ui:configure'] }).catch(err => console.error('Failed to initialize Mods Server Channel in App.vue:', err))
+  await serverChannelStore.initialize({ possibleEvents: ['ui:configure'] }).catch((err: any) => console.error('Failed to initialize Mods Server Channel in App.vue:', err))
   await contextBridgeStore.initialize()
   characterOrchestratorStore.initialize()
 
-  // ── echo-memory 마운트 ─────────────────────────────────────────────
-  console.log('[App.vue] .env dump:', {
-    bouncerBase: import.meta.env.VITE_BOUNCER_BASE_URL,
-    geminiKey: import.meta.env.VITE_GEMINI_API_KEY ? 'EXISTS' : 'MISSING',
-  })
 
-  // echo-memory LLM 로깅을 llm.log로 연동
-  const echoLogger = createLLMLogger({
-    prefix: '[echo-memory]',
-    onLog: (entry) => {
-      if (typeof (window as any).logLLM === 'function') {
-        const ts = new Date(entry.timestamp).toISOString().slice(11, 23)
-        const dir = entry.direction === 'REQUEST' ? 'REQ' : 'RES'
-        const dur = entry.durationMs !== undefined ? ` (${entry.durationMs}ms)` : ''
-        const model = entry.model ? ` [${entry.model}]` : ''
-        const cleanContent = entry.content.replace(/\r?\n/g, ' ')
-        const preview = entry.inputPreview ? ` | input: ${entry.inputPreview.slice(0, 60).replace(/\r?\n/g, ' ')}` : ''
-        
-        const line = `[echo-memory] ${ts} [${entry.role}]${model} ${dir}${dur}${preview} - ${cleanContent}`
-        ;(window as any).logLLM(line).catch(() => {})
-      }
-    }
-  })
-  setGlobalLLMLogger(echoLogger)
 
-  // .env.local에서 설정 읽기. VITE_BOUNCER_BASE_URL 없으면 echo-memory 비활성화
-  const bouncerBaseUrl = import.meta.env.VITE_BOUNCER_BASE_URL
-  if (bouncerBaseUrl) {
-    const geminiBase = import.meta.env.VITE_GEMINI_BASE_URL
-      ?? 'https://generativelanguage.googleapis.com/v1beta/openai/'
-    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY
-
-    // Summarizer용 LLM (미설정 시 Bouncer 공유)
-    const summarizerBaseUrl = import.meta.env.VITE_SUMMARIZER_BASE_URL
-    const summarizerModel = import.meta.env.VITE_SUMMARIZER_MODEL
-    const summarizerHasGemini = !summarizerBaseUrl && geminiKey
-
-    // Progress Summarizer용 LLM (미설정 시 Summarizer → Bouncer 폴백)
-    const progressBaseUrl = import.meta.env.VITE_PROGRESS_BASE_URL
-    const progressModel = import.meta.env.VITE_PROGRESS_MODEL
-    const progressHasGemini = !progressBaseUrl && geminiKey
-
-    echoMemory = mountEchoMemory(
-      serverChannelStore,
-      chatOrchestratorStore,
-      chatContextStore,
-      {
-        bouncer: {
-          baseUrl: bouncerBaseUrl,
-          apiKey: import.meta.env.VITE_BOUNCER_API_KEY || geminiKey || undefined,
-          model: import.meta.env.VITE_BOUNCER_MODEL ?? 'local-model',
-          timeoutMs: Number(import.meta.env.VITE_BOUNCER_TIMEOUT_MS ?? 5000),
-        },
-        ...(summarizerBaseUrl
-          ? {
-              summarizerLLM: {
-                baseUrl: summarizerBaseUrl,
-                apiKey: import.meta.env.VITE_SUMMARIZER_API_KEY || geminiKey || undefined,
-                model: summarizerModel ?? 'local-model',
-              },
-            }
-          : summarizerHasGemini
-            ? {
-                summarizerLLM: {
-                  baseUrl: `${geminiBase.replace(/\/$/, '')}/`,
-                  apiKey: geminiKey,
-                  model: summarizerModel ?? import.meta.env.VITE_ACTIVE_MODEL ?? 'gemini-2.0-flash-lite',
-                },
-              }
-            : {}),
-        ...(progressBaseUrl
-          ? {
-              progressLLM: {
-                baseUrl: progressBaseUrl,
-                apiKey: import.meta.env.VITE_PROGRESS_API_KEY || geminiKey || undefined,
-                model: progressModel ?? 'local-model',
-              },
-            }
-          : progressHasGemini
-            ? {
-                progressLLM: {
-                  baseUrl: `${geminiBase.replace(/\/$/, '')}/`,
-                  apiKey: geminiKey,
-                  model: progressModel ?? import.meta.env.VITE_ACTIVE_MODEL ?? 'gemini-2.0-flash-lite',
-                },
-              }
-            : {}),
-        autoSpeak: undefined,
-      },
-    )
-    console.info('[echo-memory] mounted (tamagotchi)', echoMemory)
-  }
-  else {
-    console.info('[echo-memory] 비활성화 (VITE_BOUNCER_BASE_URL 미설정)')
-  }
-
-  // ── auto-speak: onAutoSpeak 훅으로 ingest() 토대 (sendQueue 경유) ────────────────
-  chatOrchestratorStore.onAutoSpeak(async (sessionId?: string) => {
-    if (!activeProvider.value || !activeModel.value)
-      return
-    const chatProvider = await providersStore.getProviderInstance(activeProvider.value)
-    if (!chatProvider)
-      return
-
-    // ingest()를 통해 sendQueue에 넣어 정상 performSend 파이프라인을 탐
-    // (currentTurnToken 갱신 + onBeforeMessageComposed + LLM 호출까지 순서 보장)
-    await chatOrchestratorStore.ingest('', {
-      model: activeModel.value,
-      chatProvider: chatProvider as any,
-      isAutoSpeak: true,
-      // auto-speak은 유저 메시지가 아니므로 input 미설정
-    }, sessionId)
-  })
-  // ─────────────────────────────────────────────────────────────────────────
 
   const startTrackingCursorPoint = useElectronEventaInvoke(electronStartTrackMousePosition)
   const reportPluginCapability = useElectronEventaInvoke(electronPluginUpdateCapability)
@@ -261,13 +140,16 @@ watch(themeColorsHueDynamic, () => {
 }, { immediate: true })
 
 onUnmounted(() => {
-  echoMemory?.dispose()
   contextBridgeStore.dispose()
 })
+
+const dismissToast = (id: string | number) => {
+  toast.dismiss(id)
+}
 </script>
 
 <template>
-  <ToasterRoot @close="id => toast.dismiss(id)">
+  <ToasterRoot @close="dismissToast">
     <Toaster />
   </ToasterRoot>
   <ResizeHandler />

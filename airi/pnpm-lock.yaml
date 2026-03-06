@@ -2041,6 +2041,9 @@ importers:
       '@proj-airi/ccc':
         specifier: workspace:*
         version: link:../ccc
+      '@proj-airi/echo-memory':
+        specifier: workspace:*
+        version: link:../echo-memory
       '@proj-airi/i18n':
         specifier: workspace:*
         version: link:../i18n
@@ -2311,6 +2314,9 @@ importers:
       '@proj-airi/drizzle-duckdb-wasm':
         specifier: 'catalog:'
         version: 0.4.29(drizzle-orm@0.45.1(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0)(@types/pg@8.16.0)(better-sqlite3@12.5.0)(kysely@0.28.9)(pg@8.19.0)(postgres@3.4.8))
+      '@proj-airi/echo-memory':
+        specifier: workspace:^
+        version: link:../echo-memory
       '@proj-airi/font-cjkfonts-allseto':
         specifier: workspace:^
         version: link:../font-cjkfonts-allseto

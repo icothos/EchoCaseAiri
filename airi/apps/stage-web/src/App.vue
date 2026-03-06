@@ -2,21 +2,20 @@
 import { OnboardingDialog, ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useSharedAnalyticsStore } from '@proj-airi/stage-ui/stores/analytics'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
-import { useChatContextStore } from '@proj-airi/stage-ui/stores/chat/context-store'
-import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
 import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/context-bridge'
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { useOnboardingStore } from '@proj-airi/stage-ui/stores/onboarding'
+import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
-import { mountEchoMemory } from '@proj-airi/echo-memory'
-import type { EchoMemoryInstance } from '@proj-airi/echo-memory'
+import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useTheme } from '@proj-airi/ui'
+import { setupEchoMemory } from '@proj-airi/stage-ui/utils'
 import { StageTransitionGroup } from '@proj-airi/ui-transitions'
 import { storeToRefs } from 'pinia'
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterView } from 'vue-router'
 import { toast, Toaster } from 'vue-sonner'
@@ -35,15 +34,13 @@ const settings = storeToRefs(settingsStore)
 const onboardingStore = useOnboardingStore()
 const chatSessionStore = useChatSessionStore()
 const serverChannelStore = useModsServerChannelStore()
-const chatOrchestratorStore = useChatOrchestratorStore()
-const chatContextStore = useChatContextStore()
 const characterOrchestratorStore = useCharacterOrchestratorStore()
 const { shouldShowSetup } = storeToRefs(onboardingStore)
 const { isDark } = useTheme()
 const cardStore = useAiriCardStore()
 const analyticsStore = useSharedAnalyticsStore()
-
-let echoMemory: EchoMemoryInstance | null = null
+useConsciousnessStore()
+useProvidersStore()
 
 const primaryColor = computed(() => {
   return isDark.value
@@ -91,108 +88,14 @@ onMounted(async () => {
   await contextBridgeStore.initialize()
   characterOrchestratorStore.initialize()
 
-  // ── echo-memory 마운트 ─────────────────────────────────────────────
-  // echo-memory LLM 로깅을 llm.log로 연동
-  const echoLogger = createLLMLogger({
-    prefix: '[echo-memory]',
-    onLog: (entry) => {
-      if (typeof (window as any).logLLM === 'function') {
-        const ts = new Date(entry.timestamp).toISOString().slice(11, 23)
-        const dir = entry.direction === 'REQUEST' ? 'REQ' : 'RES'
-        const dur = entry.durationMs !== undefined ? ` (${entry.durationMs}ms)` : ''
-        const model = entry.model ? ` [${entry.model}]` : ''
-        const cleanContent = entry.content.replace(/\r?\n/g, ' ')
-        const preview = entry.inputPreview ? ` | input: ${entry.inputPreview.slice(0, 60).replace(/\r?\n/g, ' ')}` : ''
-        
-        const line = `[echo-memory] ${ts} [${entry.role}]${model} ${dir}${dur}${preview} - ${cleanContent}`
-        ;(window as any).logLLM(line).catch(() => {})
-      }
-    }
-  })
-  setGlobalLLMLogger(echoLogger)
-
-  // .env.local에서 설정 읽기. VITE_BOUNCER_BASE_URL 없으면 echo-memory 비활성화
-  const bouncerBaseUrl = import.meta.env.VITE_BOUNCER_BASE_URL
-  if (bouncerBaseUrl) {
-    const geminiBase = import.meta.env.VITE_GEMINI_BASE_URL
-      ?? 'https://generativelanguage.googleapis.com/v1beta/openai/'
-    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY
-
-    // Summarizer용 LLM (미설정 시 Bouncer 공유)
-    const summarizerBaseUrl = import.meta.env.VITE_SUMMARIZER_BASE_URL
-    const summarizerModel = import.meta.env.VITE_SUMMARIZER_MODEL
-    const summarizerHasGemini = !summarizerBaseUrl && geminiKey
-
-    // Progress Summarizer용 LLM (미설정 시 Summarizer → Bouncer 폴백)
-    const progressBaseUrl = import.meta.env.VITE_PROGRESS_BASE_URL
-    const progressModel = import.meta.env.VITE_PROGRESS_MODEL
-    const progressHasGemini = !progressBaseUrl && geminiKey
-
-    echoMemory = mountEchoMemory(
-      serverChannelStore,
-      chatOrchestratorStore,
-      chatContextStore,
-      {
-        bouncer: {
-          baseUrl: bouncerBaseUrl,
-          apiKey: import.meta.env.VITE_BOUNCER_API_KEY || geminiKey || undefined,
-          model: import.meta.env.VITE_BOUNCER_MODEL ?? 'local-model',
-          timeoutMs: Number(import.meta.env.VITE_BOUNCER_TIMEOUT_MS ?? 5000),
-        },
-        // Summarizer LLM: VITE_SUMMARIZER_BASE_URL 설정 시 독립 엔드포인트,
-        // 없고 Gemini 키가 있으면 Gemini 사용, 둘 다 없으면 Bouncer 공유
-        ...(summarizerBaseUrl
-          ? {
-              summarizerLLM: {
-                baseUrl: summarizerBaseUrl,
-                apiKey: import.meta.env.VITE_SUMMARIZER_API_KEY || geminiKey || undefined,
-                model: summarizerModel ?? 'local-model',
-              },
-            }
-          : summarizerHasGemini
-            ? {
-                summarizerLLM: {
-                  baseUrl: `${geminiBase.replace(/\/$/, '')}/`,
-                  apiKey: geminiKey,
-                  model: summarizerModel ?? import.meta.env.VITE_ACTIVE_MODEL ?? 'gemini-2.0-flash-lite',
-                },
-              }
-            : {}),
-        // Progress LLM: 동일 폴백 체인
-        ...(progressBaseUrl
-          ? {
-              progressLLM: {
-                baseUrl: progressBaseUrl,
-                apiKey: import.meta.env.VITE_PROGRESS_API_KEY || geminiKey || undefined,
-                model: progressModel ?? 'local-model',
-              },
-            }
-          : progressHasGemini
-            ? {
-                progressLLM: {
-                  baseUrl: `${geminiBase.replace(/\/$/, '')}/`,
-                  apiKey: geminiKey,
-                  model: progressModel ?? import.meta.env.VITE_ACTIVE_MODEL ?? 'gemini-2.0-flash-lite',
-                },
-              }
-            : {}),
-      },
-    )
-    // eslint-disable-next-line no-console
-    console.debug('[echo-memory] mounted', echoMemory)
-  }
-  else {
-    // eslint-disable-next-line no-console
-    console.debug('[echo-memory] 비활성화 (VITE_BOUNCER_BASE_URL 미설정)')
-  }
-  // ────────────────────────────────────────────────────────────────────
-
   await displayModelsStore.loadDisplayModelsFromIndexedDB()
   await settingsStore.initializeStageModel()
+
+  // ── echo-memory 마운트 ─────────────────────────────────────────────
+  await setupEchoMemory()
 })
 
 onUnmounted(() => {
-  echoMemory?.dispose()
   contextBridgeStore.dispose()
 })
 
