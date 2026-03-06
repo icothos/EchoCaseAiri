@@ -165,13 +165,6 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
       stream,
       writeLiteral(value: string) {
         console.warn(`[speech-bus] RemoteIntent writeLiteral: "${value}" | closed=${closed}`)
-        try {
-          if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-            (window as any).electron.ipcRenderer.invoke('log:tts', `[${Date.now()}] [speech-bus] RemoteIntent writeLiteral: "${value.slice(0,30)}" | closed=${closed}\n`).catch(() => {})
-          } else if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-            (window as any).logTTS(`[${Date.now()}] [speech-bus] RemoteIntent writeLiteral: "${value.slice(0,30)}" | closed=${closed}\n`).catch(() => {})
-          }
-        } catch {}
         if (closed)
           return
         write({ type: 'literal', value, streamId, intentId, sequence, createdAt: Date.now() })
@@ -185,13 +178,6 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
       },
       writeSpecial(value: string) {
         console.warn(`[speech-bus] RemoteIntent writeSpecial: "${value}" | closed=${closed}`)
-        try {
-          if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-            (window as any).electron.ipcRenderer.invoke('log:tts', `[${Date.now()}] [speech-bus] RemoteIntent writeSpecial: "${value}" | closed=${closed}\n`).catch(() => {})
-          } else if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-            (window as any).logTTS(`[${Date.now()}] [speech-bus] RemoteIntent writeSpecial: "${value}" | closed=${closed}\n`).catch(() => {})
-          }
-        } catch {}
         if (closed)
           return
         write({ type: 'special', value, streamId, intentId, sequence, createdAt: Date.now() })
@@ -250,11 +236,6 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
         return
       hostPipeline = pipeline
       hostReady = true
-      try {
-        if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-          (window as any).electron.ipcRenderer.invoke('log:tts', `[${Date.now()}] [speech-bus] registerHost called! hostReady=true\n`).catch(() => {})
-        }
-      } catch {}
       bindSpeechBusToHost()
     }
     finally {
@@ -263,12 +244,6 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
   }
 
   function openIntent(options?: IntentOptions) {
-      try {
-        if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-          (window as any).electron.ipcRenderer.invoke('log:tts', `[${Date.now()}] [speech-bus] openIntent called! isHost=${!!hostPipeline}\nCaller Stack: ${new Error().stack}\n`).catch(() => {})
-        }
-    } catch {}
-
     if (hostPipeline)
       return hostPipeline.openIntent(options)
 

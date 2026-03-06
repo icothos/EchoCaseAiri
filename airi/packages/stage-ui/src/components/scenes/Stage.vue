@@ -377,9 +377,8 @@ speechPipeline.on('onSpecial', (segment) => {
 })
 
 speechPipeline.on('onIntentEnd', (intentId) => {
-  // TTS 다운로드 파이프라인이 하나의 Intent를 완전히 완료했을 때, 
-  // 발생할 수 있는 "마지막 TTS 청크가 실패하여 오디오 큐에 안 들어간 경우"를 대비합니다.
-  tryScheduleAutoSpeak(intentId || currentTurnToken.value, undefined, '[Stage] TTS 파이프라인 처리 완료 (오디오 큐가 비어있을 수 있음)')
+  // TTS 다운로드 파이프라인이 하나의 Intent를 완전히 완료했을 때.
+  // 이전에 여기서 Auto-Speak을 콜했으나 사용자의 요청으로 제거됨.
 })
 
 // onStart: TTS 오디오 재생 시작 시점 → text 포함하여 windows:chat에 started 신호 전송 → 텍스트 표시
@@ -527,44 +526,7 @@ chatHookCleanups.push(onBeforeSend(async (message) => {
 }))
 
 chatHookCleanups.push(onTokenLiteral(async (literal) => {
-  try {
-    if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-      (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_LITERAL] Received literal from hook: "${literal}"\n`).catch(() => {})
-    } else if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-      (window as any).logTTS(`[${new Date().toISOString()}] [STAGE_HOOK_LITERAL] Received literal from hook: "${literal}"\n`).catch((e: any) => console.error(e))
-    }
-  } catch (e) { console.error('[logTTS]', e) }
-  
-  if (!currentChatIntent.value) {
-    try {
-      if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-        (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_ERROR] currentChatIntent is NULL! Literal dropped.\n`).catch(() => {})
-      }
-    } catch {}
-  } else if (typeof currentChatIntent.value.writeLiteral !== 'function') {
-    try {
-      if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-        (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_ERROR] currentChatIntent exists but writeLiteral is MISSING!\n`).catch(() => {})
-      }
-    } catch {}
-  } else {
-    try {
-      if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-        (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_SUCCESS] Firing writeLiteral now!\n`).catch(() => {})
-      }
-    } catch {}
-  }
-  
-  try {
-    currentChatIntent.value?.writeLiteral(literal)
-    if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-      (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_SUCCESS] Fired writeLiteral completely!\n`).catch(() => {})
-    }
-  } catch (err: any) {
-    if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-      (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [STAGE_HOOK_CRASH] writeLiteral crashed: ${err.message}\n`).catch(() => {})
-    }
-  }
+  currentChatIntent.value?.writeLiteral(literal)
 }))
 
 chatHookCleanups.push(onTokenSpecial(async (special) => {
@@ -582,9 +544,7 @@ chatHookCleanups.push(onAssistantResponseEnd(async (_message, context) => {
   currentChatIntent.value = null
 
   console.warn(`[TRACER] [Stage] onAssistantResponseEnd. waiting: ${playbackManager.getWaitingCount()}, nowSpeaking: ${nowSpeaking.value}, isProcessing: ${speechRuntimeStore.isProcessing()}, activeCount: ${speechRuntimeStore.getActiveCount()}`)
-
-  // LLM 응답이 완전히 끝났을 때, 만약 이미 처리 중인 TTS나 재생 중인 오디오가 없다면 여기서 auto-speak를 스케줄합니다.
-  tryScheduleAutoSpeak(context.turnToken || currentTurnToken.value, context.sessionId, '[Stage] LLM 종료 시점에 잔여 TTS/처리 오디오 없음')
+  // 예전에는 여기서 Auto-Speak을 초기 호출했으나 유저 요청으로 오직 오디오 재생이 끝난 시점 (playbackManager.onEnd) 에서만 스케줄합니다.
 }))
 
 let isAutoSpeakScheduled = false
@@ -602,10 +562,11 @@ function tryScheduleAutoSpeak(token: string | undefined, sessionId: string | und
     const waitingPlaybackCount = playbackManager.getWaitingCount()
 
     // 1. LLM 생성 중이 아니고
-    // 2. TTS 파이프라인 다운로드 중이 아니고 (임시 우회: !isProcessing 제거)
+    // 2. TTS 파이프라인 다운로드 중이 아니고
     // 3. WebAudio 큐에 활성 재생중인 오디오가 없고
     // 4. WebAudio 큐에 대기중인 항목이 없을 때만 스케줄!
-    if (!isSending && activePlaybackCount === 0 && waitingPlaybackCount === 0) {
+    const isProcessing = speechRuntimeStore.isProcessing()
+    if (!isSending && !isProcessing && activePlaybackCount === 0 && waitingPlaybackCount === 0) {
       isAutoSpeakScheduled = true
       console.debug(`${debugReason} - auto-speak 스케줄 (token: ${token.slice(0, 8)})`)
 

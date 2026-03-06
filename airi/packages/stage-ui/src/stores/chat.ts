@@ -254,13 +254,9 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           const speechOnly = categorizer.filterToSpeech(literal, streamPosition)
           console.info(`[Chat Parser] incoming: "${literal}" -> speech: "${speechOnly}"`)
           
-          try {
-            if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-              (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [CHAT_CATEGORIZER] literal: "${literal.replace(/\n/g, '\\n')}" -> speechOnly: "${speechOnly.replace(/\n/g, '\\n')}"\n`).catch(() => {})
-            } else if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-              (window as any).logTTS(`[${new Date().toISOString()}] [CHAT_CATEGORIZER] literal: "${literal.replace(/\n/g, '\\n')}" -> speechOnly: "${speechOnly.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
-            }
-          } catch (e) { console.error('[logTTS]', e) }
+          if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
+            (window as any).logTTS(`[${new Date().toISOString()}] [CHAT_CATEGORIZER] literal: "${literal.replace(/\n/g, '\\n')}" -> speechOnly: "${speechOnly.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
+          }
 
           if (options.isAutoSpeak && speechOnly.trim() === '') {
             console.warn('[Chat Parser] AutoSpeak emitted token but filterToSpeech returned empty string! Literal:', literal)
@@ -428,13 +424,9 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
                 break
               case 'text-delta':
                 fullText += event.text
-                try {
-                  if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-                    (window as any).electron.ipcRenderer.invoke('log:tts', `[${new Date().toISOString()}] [LLM_STREAM] text-delta: "${event.text.replace(/\n/g, '\\n')}"\n`).catch(() => {})
-                  } else if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
-                    (window as any).logTTS(`[${new Date().toISOString()}] [LLM_STREAM] text-delta: "${event.text.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
-                  }
-                } catch (e) { console.error('[logTTS]', e) }
+                if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
+                  (window as any).logTTS(`[${new Date().toISOString()}] [LLM_STREAM] text-delta: "${event.text.replace(/\n/g, '\\n')}"\n`).catch((e: any) => console.error(e))
+                }
                 await parser.consume(event.text)
                 break
               case 'finish':

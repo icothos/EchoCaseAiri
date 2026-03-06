@@ -158,9 +158,7 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
           try {
             broadcastStreamEvent({ type: 'before-compose', message, sessionId: chatSession.activeSessionId, context: structuredClone(toRaw(context)) })
           } catch (err: any) {
-            if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-              (window as any).electron.ipcRenderer.invoke('log:tts', `[${Date.now()}] [CONTEXT_BRIDGE_CRASH] before-compose structuredClone Error: ${err.message}\n`)
-            }
+             console.error('[context-bridge] before-compose structuredClone Error:', err)
           }
         }),
         chatOrchestrator.onAfterMessageComposed(async (message, context) => {

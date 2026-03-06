@@ -61,13 +61,8 @@ function createId(prefix: string) {
 function writeTtsDebugLog(intentId: string, event: string, details: string) {
   const time = new Date().toISOString()
   const logLine = `[${time}] [Intent: ${intentId.slice(0, 8)}] [${event}] ${details}\n`
+  // Try exposed contextBridge
   try {
-    // Try explicit IPC if available
-    if (typeof window !== 'undefined' && (window as any).electron?.ipcRenderer) {
-      (window as any).electron.ipcRenderer.invoke('log:tts', logLine.trim()).catch(() => {})
-      return
-    }
-    // Try exposed contextBridge
     if (typeof window !== 'undefined' && typeof (window as any).logTTS === 'function') {
       ;(window as any).logTTS(logLine.trim()).catch((e: any) => console.error('[logTTS IPC Error]', e))
       return
@@ -75,8 +70,6 @@ function writeTtsDebugLog(intentId: string, event: string, details: string) {
   } catch (e) {
     console.error('[writeTtsDebugLog] Synchronous error calling window.logTTS:', e)
   }
-  // Fallback to console
-  console.log(`[TTS DEBUG] ${logLine.trim()}`)
 }
 
 export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAudio>) {
