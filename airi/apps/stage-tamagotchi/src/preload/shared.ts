@@ -25,6 +25,16 @@ export function expose() {
       contextBridge.exposeInMainWorld('logChat', (line: string) =>
         ipcRenderer.invoke('log:chat', line),
       )
+      contextBridge.exposeInMainWorld('logMemory', (line: string) =>
+        ipcRenderer.invoke('log:memory', line),
+      )
+      // File system APIs (restricted to context dir)
+      contextBridge.exposeInMainWorld('fsReadFile', (fileName: string) => 
+        ipcRenderer.invoke('fs:readFile', fileName)
+      )
+      contextBridge.exposeInMainWorld('fsCheckFileExists', (fileName: string) => 
+        ipcRenderer.invoke('fs:checkFileExists', fileName)
+      )
     }
     catch (error) {
       console.error(error)
@@ -35,6 +45,9 @@ export function expose() {
     window.platform = platform
       ; (window as any).logLLM = (line: string) => ipcRenderer.invoke('log:llm', line)
       ; (window as any).logChat = (line: string) => ipcRenderer.invoke('log:chat', line)
+      ; (window as any).logMemory = (line: string) => ipcRenderer.invoke('log:memory', line)
+      ; (window as any).fsReadFile = (fileName: string) => ipcRenderer.invoke('fs:readFile', fileName)
+      ; (window as any).fsCheckFileExists = (fileName: string) => ipcRenderer.invoke('fs:checkFileExists', fileName)
   }
 }
 

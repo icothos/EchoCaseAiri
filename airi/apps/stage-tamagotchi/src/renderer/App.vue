@@ -18,6 +18,7 @@ import { listProvidersForPluginHost, shouldPublishPluginHostCapabilities } from 
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
+import { useHotContextManager } from '@proj-airi/stage-ui/composables/hot-context'
 import { useTheme } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { onMounted, onUnmounted, watch } from 'vue'
@@ -62,6 +63,7 @@ const pluginHostInspectorStore = usePluginHostInspectorStore()
 useConsciousnessStore()
 useProvidersStore()
 usePerfTracerBridgeStore()
+useHotContextManager()
 
 watch(language, () => {
   i18n.locale.value = language.value

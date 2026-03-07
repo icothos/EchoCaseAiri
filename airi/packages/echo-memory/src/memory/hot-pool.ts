@@ -8,6 +8,7 @@ import { nanoid } from 'nanoid'
 export function createHotContextPool(options?: HotPoolOptions) {
     const topK = options?.topK ?? 3
     const defaultTtl = options?.defaultTtl ?? 1800 // 30분 (초)
+    const onUpdate = options?.onUpdate
 
     const nodes: ContextNode[] = []
 
@@ -63,6 +64,7 @@ export function createHotContextPool(options?: HotPoolOptions) {
                 }
 
         nodes.push(node)
+        onUpdate?.('add', node)
         return node
     }
 
@@ -81,8 +83,10 @@ export function createHotContextPool(options?: HotPoolOptions) {
     /** 노드 완료 처리 */
     function markCompleted(nodeId: string): void {
         const node = nodes.find(n => n.id === nodeId)
-        if (node)
+        if (node) {
             node.completed = true
+            onUpdate?.('update', node)
+        }
     }
 
     /** 노드 영구 삭제 */
@@ -90,8 +94,10 @@ export function createHotContextPool(options?: HotPoolOptions) {
         const idSet = new Set(nodeIds)
         let i = nodes.length
         while (i--) {
-            if (idSet.has(nodes[i].id))
-                nodes.splice(i, 1)
+            if (idSet.has(nodes[i].id)) {
+                const removed = nodes.splice(i, 1)[0]
+                onUpdate?.('remove', removed)
+            }
         }
     }
 
@@ -119,6 +125,8 @@ export function createHotContextPool(options?: HotPoolOptions) {
             lines.push(`진행: ${newProgress}`)
         top.content = lines.join('\n')
 
+        onUpdate?.('update', top)
+
         return true
     }
 
@@ -142,6 +150,8 @@ export function createHotContextPool(options?: HotPoolOptions) {
         if (node.nodeType === 'context_summary') {
             rebuildContent(node)
         }
+        
+        onUpdate?.('update', node)
         return true
     }
 

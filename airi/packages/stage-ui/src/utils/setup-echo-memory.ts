@@ -81,6 +81,17 @@ export async function setupEchoMemory() {
                         model: bouncerSettings.model ?? 'local-model',
                         timeoutMs: Number(bouncerSettings.timeoutMs ?? 5000),
                     },
+                    hotPool: {
+                        onUpdate: (action: 'add' | 'update' | 'remove', node: any) => {
+                            if (typeof (window as any).logMemory === 'function') {
+                                const time = new Date().toISOString().slice(11, 23)
+                                const actionText = action.toUpperCase().padEnd(6, ' ')
+                                const nodeInfo = `[${actionText}] ID: ${node.id} | Type: ${node.nodeType} | Weight: ${node.weight} | TTL: ${node.ttl}`
+                                const content = node.content ? `\n  ${node.content.split('\n').join('\n  ')}` : ''
+                                ;(window as any).logMemory(`[echo-memory] ${time} ${nodeInfo}${content}`)
+                            }
+                        }
+                    },
                     ...(bouncerSettings.summarizerBaseUrl
                         ? {
                             summarizerLLM: {

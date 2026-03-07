@@ -79,6 +79,8 @@ export interface HotPoolOptions {
     topK?: number
     /** 기본 TTL (초, 기본 1800 = 30분) */
     defaultTtl?: number
+    /** 메모리 풀 변경 시 호출되는 이벤트 후크 */
+    onUpdate?: (action: 'add' | 'update' | 'remove', node: Partial<ContextNode>) => void
 }
 
 export interface SummarizerOptions {

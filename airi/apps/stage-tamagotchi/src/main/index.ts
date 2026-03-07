@@ -2,7 +2,7 @@ import WebSocket from 'ws'
 
 global.WebSocket = WebSocket as any
 
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { env, platform } from 'node:process'
 
@@ -60,6 +60,48 @@ ipcMain.handle('log:chat', (_event, line: string) => {
     appendFileSync(join(getLogsDir(), 'chat.log'), line + '\n', 'utf-8')
   }
   catch { /* 로그 실패는 무시 */ }
+})
+
+ipcMain.handle('log:memory', (_event, line: string) => {
+  try {
+    appendFileSync(join(getLogsDir(), 'memory.log'), line + '\n', 'utf-8')
+  }
+  catch { /* 로그 실패는 무시 */ }
+})
+
+let _contextsDir: string | null = null
+function getContextsDir(): string {
+  if (!_contextsDir) {
+    _contextsDir = join(app.getPath('userData'), 'contexts')
+    try { mkdirSync(_contextsDir, { recursive: true }) }
+    catch { /* ignore */ }
+  }
+  return _contextsDir
+}
+
+ipcMain.handle('fs:readFile', (_, fileName: string) => {
+  try {
+    const filePath = join(getContextsDir(), fileName)
+    // Prevent directory traversal
+    if (!filePath.startsWith(getContextsDir())) return null
+    if (!existsSync(filePath)) return null
+    return {
+      content: readFileSync(filePath, 'utf-8'),
+      mtimeMs: statSync(filePath).mtimeMs
+    }
+  } catch {
+    return null
+  }
+})
+
+ipcMain.handle('fs:checkFileExists', (_, fileName: string) => {
+  try {
+    const filePath = join(getContextsDir(), fileName)
+    if (!filePath.startsWith(getContextsDir())) return false
+    return existsSync(filePath)
+  } catch {
+    return false
+  }
 })
 
 ipcMain.setMaxListeners(100)
