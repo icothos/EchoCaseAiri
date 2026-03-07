@@ -118,7 +118,8 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         }
 
         // ② LLM 완료 후 cooldown — 다음 큐 항목 처리 전 대기 (VITE_CHAT_COOLDOWN_MS)
-        if (chatCooldownMs > 0)
+        const isBlankAutoSpeak = options.isAutoSpeak && (!finalMessage || finalMessage.trim() === '')
+        if (chatCooldownMs > 0 && !isBlankAutoSpeak)
           await new Promise<void>(resolve => setTimeout(resolve, chatCooldownMs))
       },
     ],
@@ -149,7 +150,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
     // auto-speak 시스템 컨텍스터 메시지 (LLM에게 자율 발화입을 알림)
     const autoSpeakContext = options.isAutoSpeak
-      ? '[SYSTEM NOTE] The user has been idle for a while. DO NOT repeat your previous response. Say something new, change the topic, or ask a question to re-engage them.'
+      ? '[SYSTEM NOTE] The user has been idle for a while. Please review the previous conversation and the current context logs carefully. Based on these, naturally continue the flow of the conversation. DO NOT just repeat your previous response. Introduce a new thought, share an observation about the context, or ask a relevant question to re-engage the user.'
       : ''
 
     chatSession.ensureSession(sessionId)
