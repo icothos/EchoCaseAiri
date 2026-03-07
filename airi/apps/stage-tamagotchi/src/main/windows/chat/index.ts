@@ -23,6 +23,7 @@ export function setupChatWindowReusableFunc(params: {
       webPreferences: {
         preload: join(__dirname, '../preload/index.mjs'),
         sandbox: false,
+        webSecurity: false,
       },
     })
 

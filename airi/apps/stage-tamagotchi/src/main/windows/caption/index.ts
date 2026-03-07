@@ -110,6 +110,7 @@ function createCaptionWindow(options?: BrowserWindowConstructorOptions) {
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,
+      webSecurity: false,
     },
     // Thanks to [@HeartArmy](https://github.com/HeartArmy) for the tip implementation.
     //

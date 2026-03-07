@@ -60,6 +60,7 @@ function createWidgetsWindow() {
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,
+      webSecurity: false,
     },
     // Top-level overlay style like other overlay windows
     type: 'panel',

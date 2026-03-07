@@ -1,0 +1,47 @@
+﻿[36mvite v8.0.0-beta.15 [32mbuilding ssr environment for development...[36m[39m
+[2K
+transforming...??43 modules transformed.
+rendering chunks...
+out/main/index.js  101.33 kB
+
+node.exe : [31m??[39m Build failed in 761ms
+위치 C:\Program Files\nodejs\npx.ps1:29 문자:3
++   & $NODE_EXE $NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([31m??[39m Buil
+d     failed in 761ms:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[41m[37m ERROR [39m[49m [31m[31mBuild failed with 1 err
+or:
+
+Error: [vite]: Rolldown failed to resolve import "ws" from "D
+:/codingagent/EchoCaseAiri/airi/apps/stage-tamagotchi/src/mai
+n/index.ts".
+This is most likely unintended because it can break your appl
+ication at runtime.
+If you do want to externalize this module explicitly add it t
+o
+`build.rollupOptions.external`
+    at viteLog (file:///D:/codingagent/EchoCaseAiri/airi/node
+_modules/.pnpm/vite@8.0.0-beta.15_@types+n_7b14efc702be7a025d
+ed58a003adc7cd/node_modules/vite/dist/node/chunks/node.js:327
+84:57)
+    at onRollupLog (file:///D:/codingagent/EchoCaseAiri/airi/
+node_modules/.pnpm/vite@8.0.0-beta.15_@types+n_7b14efc702be7a
+025ded58a003adc7cd/node_modules/vite/dist/node/chunks/node.js
+:32816:7)
+    at onLog (file:///D:/codingagent/EchoCaseAiri/airi/node_m
+odules/.pnpm/vite@8.0.0-beta.15_@types+n_7b14efc702be7a025ded
+58a003adc7cd/node_modules/vite/dist/node/chunks/node.js:32583
+:4)
+    at file:///D:/codingagent/EchoCaseAiri/airi/node_modules/
+.pnpm/rolldown@1.0.0-rc.5/node_modules/rolldown/dist/shared/r
+olldown-build-CZ74hiRH.mjs:50:26
+    at logger (file:///D:/codingagent/EchoCaseAiri/airi/node_
+modules/.pnpm/rolldown@1.0.0-rc.5/node_modules/rolldown/dist/
+shared/rolldown-build-CZ74hiRH.mjs:41:3)
+    at onLog (file:///D:/codingagent/EchoCaseAiri/airi/node_m
+odules/.pnpm/rolldown@1.0.0-rc.5/node_modules/rolldown/dist/s
+hared/bindingify-input-options-BAtaPAL4.mjs:1974:32)[31m[39
+m

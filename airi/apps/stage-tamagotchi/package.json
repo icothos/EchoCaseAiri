@@ -128,7 +128,8 @@
     "vue-sonner": "catalog:",
     "xsschema": "catalog:",
     "yauzl": "^3.2.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "ws": "catalog:"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",

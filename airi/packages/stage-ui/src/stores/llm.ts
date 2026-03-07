@@ -9,6 +9,7 @@ import { ref } from 'vue'
 
 import { debug, mcp } from '../tools'
 import { isGeminiProvider, streamGeminiNative } from './gemini-utils'
+import { isGrokProvider, streamGrokNative } from './grok-utils'
 
 export type StreamEvent
   = | { type: 'text-delta', text: string }
@@ -108,6 +109,26 @@ async function streamFrom(model: string, chatProvider: ChatProvider, promptNode:
           return
         }
         streamGeminiNative(
+          model,
+          apiKey,
+          promptNode,
+          sanitized,
+          tools,
+          event => onEvent(event as any),
+          line => { (window as any).logLLM?.(line) },
+          rawSystemPrompt
+        ).catch(rejectOnce)
+        return
+      }
+      
+      // ── Grok native path ──────────────────────────────────────
+      if (isGrokProvider(chatProvider, model)) {
+        const apiKey = (import.meta.env as any).VITE_GROK_API_KEY as string | undefined
+        if (!apiKey) {
+          rejectOnce(new Error('VITE_GROK_API_KEY is not set'))
+          return
+        }
+        streamGrokNative(
           model,
           apiKey,
           promptNode,

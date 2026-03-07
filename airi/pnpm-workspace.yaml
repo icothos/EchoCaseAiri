@@ -9,6 +9,7 @@ packages:
   - '!**/dist/**'
 
 catalog:
+  '@ai-sdk/xai': ^1.0.23
   '@capacitor/cli': ^8.1.0
   '@capacitor/core': ^8.1.0
   '@capacitor/ios': ^8.1.0
@@ -49,6 +50,7 @@ catalog:
   '@xsai/stream-text': ^0.4.3
   '@xsai/tool': ^0.4.3
   '@xsai/utils-chat': 0.4.0-beta.13
+  ai: ^4.1.28
   async-mutex: 0.5.0
   axios: npm:feaxios@^0.0.23
   better-auth: ^1.4.19
