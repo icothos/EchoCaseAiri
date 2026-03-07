@@ -4,7 +4,7 @@
  */
 
 import { createXai, xai as xaiModule } from '@ai-sdk/xai'
-import { streamText, type CoreMessage } from 'ai'
+import { streamText } from 'ai'
 
 // Simple fast string hashing for prompt deduplication & cache keys
 function cyrb53(str: string, seed = 0) {
@@ -120,7 +120,7 @@ export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
     const startedAt = Date.now()
 
     // --- Construct Request Payload for AI SDK ---
-    const payloadMessages: CoreMessage[] = []
+    const payloadMessages: { role: 'user' | 'assistant' | 'system', content: string }[] = []
 
     for (let i = 0; i < messages.length; i++) {
         let textValue = extractText(messages[i].content)
@@ -147,46 +147,63 @@ export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
     if (attachSearchTools) {
         const xaiTools = (xaiModule as any).tools
         if (typeof xaiTools?.webSearch === 'function') {
-            aiTools.webSearch = xaiTools.webSearch()
+            aiTools.web_search = xaiTools.webSearch()
         }
         if (typeof xaiTools?.xSearch === 'function') {
-            aiTools.xSearch = xaiTools.xSearch()
+            aiTools.x_search = xaiTools.xSearch()
         }
     }
 
+    let fetchOptions: Parameters<typeof streamText>[0] | undefined
+
     try {
-        const result = streamText({
-            model: xai.languageModel(model) as any,
+        const xaiModelMode = attachSearchTools && typeof (xai as any).responses === 'function' 
+            ? (xai as any).responses(model) 
+            : xai.languageModel(model)
+
+        fetchOptions = {
+            model: xaiModelMode as Parameters<typeof streamText>[0]['model'],
             system: pureSystemPrompt || undefined,
-            messages: payloadMessages,
-            // Only pass tools if they exist, otherwise Vercel AI SDK might throw or behave unexpectedly
-            ...(Object.keys(aiTools).length > 0 ? { tools: aiTools as any } : {}),
+            messages: payloadMessages as Parameters<typeof streamText>[0]['messages'],
             maxSteps: 10
-        })
+        } as Parameters<typeof streamText>[0]
+        
+        if (Object.keys(aiTools).length > 0) {
+            fetchOptions.tools = aiTools as any
+        }
+
+        const result = streamText(fetchOptions)
 
         let fullText = ''
 
         // Listen to full stream chunks to catch text, tool calls and finish events
         for await (const chunk of result.fullStream) {
             if (chunk.type === 'text-delta') {
-                fullText += chunk.textDelta
-                await onEvent({ type: 'text-delta', text: chunk.textDelta })
+                const textValue = (chunk as any).text || (chunk as any).textDelta || ''
+                fullText += textValue
+                await onEvent({ type: 'text-delta', text: textValue })
             } else if (chunk.type === 'tool-call') {
                 await onEvent({
                     type: 'tool-call',
                     toolCallId: chunk.toolCallId,
                     toolName: chunk.toolName,
-                    args: chunk.args as Record<string, unknown>
+                    args: (chunk as any).input || (chunk as any).args as Record<string, unknown>
                 })
             } else if (chunk.type === 'finish') {
                 const ms = Date.now() - startedAt
                 const ts1 = new Date().toISOString().slice(11, 23)
 
-                const usage = chunk.usage
+                const usage = (chunk as any).totalUsage || (chunk as any).usage
                 const usageMetadata = usage ? {
-                    prompt_token_count: usage.promptTokens,
-                    candidates_token_count: usage.completionTokens,
-                    total_token_count: usage.totalTokens
+                    prompt_token_count: usage.promptTokens ?? usage.inputTokens,
+                    candidates_token_count: usage.completionTokens ?? usage.outputTokens,
+                    total_token_count: usage.totalTokens,
+                    ...((usage.inputTokenDetails || usage.promptTokenDetails || usage.outputTokenDetails || usage.completionTokenDetails) ? {
+                        details: {
+                            ...(usage.inputTokenDetails || usage.promptTokenDetails ? { prompt: usage.inputTokenDetails || usage.promptTokenDetails } : {}),
+                            ...(usage.outputTokenDetails || usage.completionTokenDetails ? { completion: usage.outputTokenDetails || usage.completionTokenDetails } : {})
+                        }
+                    } : {})
                 } : null
 
                 const tokenInfo = usageMetadata
@@ -201,12 +218,16 @@ export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
                     usage: usageMetadata
                 })
             } else if (chunk.type === 'error') {
-                throw chunk.error
+                throw (chunk as any).error
             }
         }
 
-    } catch (e) {
-        _log(`${reqTag}[GROK ERROR] ${e}`)
+    } catch (e: any) {
+        console.error('--- GROK STREAM ERROR ---')
+        console.error('fetchOptions payload:', JSON.stringify(fetchOptions, null, 2))
+        console.error('Error details:', e)
+        console.error('-------------------------')
+        _log(`${reqTag}[GROK ERROR] ${e?.message || e}`)
         await onEvent({ type: 'error', error: e })
         throw e
     }
