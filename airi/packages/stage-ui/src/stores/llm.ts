@@ -50,7 +50,9 @@ async function streamFrom(model: string, chatProvider: ChatProvider, promptNode:
   const headers = options?.headers
   const rawSystemPrompt = options?.rawSystemPrompt
 
-  const sanitized = sanitizeMessages(messages as unknown[])
+  const rawSanitized = sanitizeMessages(messages as unknown[])
+  const hasRagIntent = rawSanitized.some(m => (m as any).id === '__RAG_INTENT__' || m.content === 'FLAG_RAG_TRIGGERED')
+  const sanitized = rawSanitized.filter(m => !((m as any).id === '__RAG_INTENT__' || m.content === 'FLAG_RAG_TRIGGERED'))
   const resolveTools = async () => {
     const tools = typeof options?.tools === 'function'
       ? await options.tools()
@@ -124,6 +126,9 @@ async function streamFrom(model: string, chatProvider: ChatProvider, promptNode:
       // ── Grok native path ──────────────────────────────────────
       if (isGrokProvider(chatProvider, model)) {
         const apiKey = (import.meta.env as any).VITE_GROK_API_KEY as string | undefined
+        const searchMode = ((import.meta.env as any).VITE_GROK_SEARCH_MODE as string | undefined) || 'none'
+        const attachSearchTools = searchMode === 'always' || (searchMode === 'rag' && hasRagIntent)
+
         if (!apiKey) {
           rejectOnce(new Error('VITE_GROK_API_KEY is not set'))
           return
@@ -136,7 +141,8 @@ async function streamFrom(model: string, chatProvider: ChatProvider, promptNode:
           tools,
           event => onEvent(event as any),
           line => { (window as any).logLLM?.(line) },
-          rawSystemPrompt
+          rawSystemPrompt,
+          attachSearchTools
         ).catch(rejectOnce)
         return
       }

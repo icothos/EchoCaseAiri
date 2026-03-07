@@ -38,7 +38,8 @@ export async function streamGrokNative(
     tools: Tool[] | undefined,
     onEvent: (event: any) => Promise<void>,
     onLog?: (line: string) => void,
-    rawSystemPrompt?: string
+    rawSystemPrompt?: string,
+    attachSearchTools?: boolean
 ): Promise<void> {
     
     // xsai Tool → grok-utils 포맷 변환 (Grok은 OpenAI 호환 포맷을 사용)
@@ -58,6 +59,7 @@ export async function streamGrokNative(
         tools: grokTools,
         onEvent,
         onLog,
-        rawSystemPrompt
+        rawSystemPrompt,
+        attachSearchTools
     })
 }

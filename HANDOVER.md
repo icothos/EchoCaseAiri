@@ -58,10 +58,13 @@
 - **조치:**
   - `console.warn`으로 임시 출력되던 스트리밍 오디오 세그먼트, 스케줄링 로그를 모두 제거하여 터미널과 브라우저 콘솔 가독성 향상.
 
-### 7. 전용 Grok API 추가
+### 7. 전용 Grok API 추가 [✅ 해결됨]
 - **요구사항:** xAI의 Grok 모델 서빙 프로바이더 연동 추가.
 - **조치:** 
-  - `xsai` 패키지 또는 내부 LLM 라우팅 로직(stage-ui `llm.ts`)에 Grok 전용 엔드포인트 호환 어댑터 작성. (Vision/Function Call 지원 여부 포함)
+  - `grok-utils` 패키지를 신설하고 `stage-ui`의 `llm.ts` 파이프라인에 네이티브 모델로 병합 연결 완료.
+  - Vercel AI SDK (`@ai-sdk/xai`) 기반의 스트리밍 및 텍스트 델타, 툴 콜(Function Call) 포맷 처리 및 `GrokStreamChunk` 맵핑 구현.
+  - `gemini-utils`와 동일한 수준의 측정(관측성) 보장을 위해 DJB2(cyrb53) 기반 프롬프트 해싱, 정적 캐시 중복 텍스트 생략 필터, Request ID 매핑 로직 구축.
+  - xAI API의 브라우저 전면단 CORS(OPTIONS Preflight 405 Error) 차단 정책을 로컬에서 우회하기 위해, Electron Main 프로세스의 렌더러 창 생성 구문(`mainWindow`, `chatWindow`, `settingsWindow`, `captionWindow`, `widgetsWindow`)들에 `webSecurity: false` 속성을 부여하여 에러 없이 통신되도록 조치.
 
 ### 8. 전용 Fish Audio API 추가
 - **요구사항:** TTS 파이프라인(목소리)의 오픈소스/고품질 대안 모델로 다변화.

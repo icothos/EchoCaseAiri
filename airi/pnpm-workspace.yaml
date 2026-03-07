@@ -9,7 +9,7 @@ packages:
   - '!**/dist/**'
 
 catalog:
-  '@ai-sdk/xai': ^1.0.23
+  '@ai-sdk/xai': ^3.0.67
   '@capacitor/cli': ^8.1.0
   '@capacitor/core': ^8.1.0
   '@capacitor/ios': ^8.1.0

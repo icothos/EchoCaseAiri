@@ -104,7 +104,16 @@ export function mountEchoMemory(
             if (result.action === 'rag') {
                 // TODO P8: Cold DB 벡터 검색
                 // eslint-disable-next-line no-console
-                console.debug('[echo-memory] Bouncer: rag (미구현)', text.slice(0, 40))
+                console.debug('[echo-memory] Bouncer: rag (Flagting for Native Agentic Search)', text.slice(0, 40))
+                chatContextStore.ingestContextMessage({
+                    id: '__RAG_INTENT__',
+                    contextId: '__RAG_INTENT__',
+                    role: 'system',
+                    source: 'echo-memory',
+                    content: 'FLAG_RAG_TRIGGERED',
+                    strategy: ContextUpdateStrategy.ReplaceSelf,
+                    createdAt: Date.now(),
+                })
             }
         }
 

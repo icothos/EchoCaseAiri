@@ -3,7 +3,7 @@
  * For `stage-ui` native integration mirroring `gemini-utils`
  */
 
-import { createXai } from '@ai-sdk/xai'
+import { createXai, xai as xaiModule } from '@ai-sdk/xai'
 import { streamText, type CoreMessage } from 'ai'
 
 // Simple fast string hashing for prompt deduplication & cache keys
@@ -39,10 +39,11 @@ export interface GrokStreamOptions {
     tools?: Array<any>
     onEvent: (event: GrokStreamChunk) => Promise<void>
     onLog?: (line: string) => void
+    attachSearchTools?: boolean
 }
 
 export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
-    const { apiKey, model, promptNode, rawSystemPrompt, messages, tools, onEvent, onLog } = opts
+    const { apiKey, model, promptNode, rawSystemPrompt, messages, tools, onEvent, onLog, attachSearchTools } = opts
 
     const _log = (line: string) => {
         // eslint-disable-next-line no-console
@@ -143,9 +144,19 @@ export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
         }
     }
 
+    if (attachSearchTools) {
+        const xaiTools = (xaiModule as any).tools
+        if (typeof xaiTools?.webSearch === 'function') {
+            aiTools.webSearch = xaiTools.webSearch()
+        }
+        if (typeof xaiTools?.xSearch === 'function') {
+            aiTools.xSearch = xaiTools.xSearch()
+        }
+    }
+
     try {
         const result = streamText({
-            model: xai.languageModel(model),
+            model: xai.languageModel(model) as any,
             system: pureSystemPrompt || undefined,
             messages: payloadMessages,
             // Only pass tools if they exist, otherwise Vercel AI SDK might throw or behave unexpectedly
