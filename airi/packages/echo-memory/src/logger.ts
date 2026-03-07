@@ -85,7 +85,7 @@ export function createLLMLogger(options?: {
         }
 
         const displayContent = truncateContent
-            ? (entry.content.length > 300 ? entry.content.slice(0, 300) + '...' : entry.content)
+            ? (entry.content.length > 100 ? entry.content.slice(0, 100) + '...' : entry.content)
             : entry.content
 
         const reqTag = entry.reqId ? `[#${entry.reqId}] ` : ''

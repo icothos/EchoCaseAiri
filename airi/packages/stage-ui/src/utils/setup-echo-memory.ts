@@ -46,7 +46,8 @@ export async function setupEchoMemory() {
                         }
                     }
 
-                    const line = `[echo-memory] ${ts} [${entry.role}]${model} ${dir}${dur}${preview}${systemStr}\n  ${cleanContent}`
+                    const reqTag = entry.reqId ? `[#${entry.reqId}] ` : ''
+                    const line = `[echo-memory] ${ts} ${reqTag}[${entry.role}]${model} ${dir}${dur}${preview}${systemStr}\n  ${cleanContent}`
                         ; (window as any).logLLM(line).catch(() => { })
                 }
             }

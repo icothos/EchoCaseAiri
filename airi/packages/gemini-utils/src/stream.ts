@@ -26,6 +26,8 @@ const _promptCacheMap = new Map<string, string>()
 // Set of seen hashes just for logging deduplication, even if API cache fails
 const _seenPromptHashes = new Set<string>()
 
+let _reqCounter = 0
+
 export interface GeminiStreamOptions {
     apiKey: string
     model: string
@@ -88,6 +90,10 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
 
     // ── 요청 로그 ──────────────────────────────────────────────
     const ts0 = new Date().toISOString().slice(11, 23)
+    _reqCounter++
+    const reqId = _reqCounter.toString().padStart(4, '0')
+    const reqTag = `[#${reqId}] `
+    
     let promptLog = ''
     if (promptNodeText) {
         if (isPromptCachedInLogs) {
@@ -112,7 +118,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
         return `  [${m.role}] ${text}`
     }).join('\n')
 
-    _log(`[GEMINI→] ${ts0} ${geminiModel} | ${messages.length} msgs\n${promptLog}${messagesLog}`)
+    _log(`${reqTag}[GEMINI→] ${ts0} ${geminiModel} | ${messages.length} msgs\n${promptLog}${messagesLog}`)
     const startedAt = Date.now()
     let fullText = ''
     // ──────────────────────────────────────────────────────────
@@ -220,7 +226,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
     const tokenInfo = usageMetadata
         ? `tokens:${JSON.stringify(usageMetadata)}`
         : `~${Math.round(fullText.length / 2)}tok est.`
-    _log(`[GEMINI←] ${ts1} ${ms}ms | ${tokenInfo}\n  [assistant] ${fullText.slice(0, 800)}${fullText.length > 800 ? '...' : ''}`)
+    _log(`${reqTag}[GEMINI←] ${ts1} ${ms}ms | ${tokenInfo}\n  [assistant] ${fullText.slice(0, 800)}${fullText.length > 800 ? '...' : ''}`)
     // ──────────────────────────────────────────────────────────
 
     await onEvent({ type: 'finish', finishReason: 'stop', usage: usageMetadata })
