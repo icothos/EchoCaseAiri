@@ -108,7 +108,6 @@ export function createPlaybackManager<TAudio>(options: PlaybackManagerOptions<TA
   }
 
   function stopActive(entry: { item: PlaybackItem<TAudio>, controller: AbortController }, reason: string) {
-    console.warn(`[Playback] stopActive item: ${entry.item.id} (intent: ${entry.item.intentId.slice(0, 6)}) reason: ${reason}`)
     entry.controller.abort(reason)
     active.delete(entry.item.id)
     emitInterrupt(entry.item, reason)
@@ -125,7 +124,6 @@ export function createPlaybackManager<TAudio>(options: PlaybackManagerOptions<TA
   }
 
   function start(item: PlaybackItem<TAudio>) {
-    console.warn(`[Playback] start item: ${item.id} (intent: ${item.intentId.slice(0, 6)}) text: "${item.text.slice(0, 30)}..."`)
     const controller = new AbortController()
     const startedAt = Date.now()
     active.set(item.id, { item, controller, startedAt })
@@ -178,7 +176,6 @@ export function createPlaybackManager<TAudio>(options: PlaybackManagerOptions<TA
   }
 
   function handleOverflow(item: PlaybackItem<TAudio>, reason: 'overflow' | 'owner-overflow') {
-    console.warn(`[Playback] Overflow reason: ${reason} for item: ${item.id}`)
     if (reason === 'owner-overflow') {
       if (ownerOverflowPolicy === 'reject') {
         emitReject(item, 'owner-overflow')
@@ -225,7 +222,6 @@ export function createPlaybackManager<TAudio>(options: PlaybackManagerOptions<TA
   }
 
   function schedule(item: PlaybackItem<TAudio>) {
-    console.warn(`[Playback] schedule item: ${item.id} (intent: ${item.intentId.slice(0, 6)}) text: "${item.text.slice(0, 30)}..."`)
     const { ok, reason } = canStart(item)
     if (ok) {
       start(item)
