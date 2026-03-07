@@ -104,12 +104,24 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
     const reqId = _reqCounter.toString().padStart(4, '0')
     const reqTag = `[#${reqId}] `
 
+    const pureSystemPrompt = rawSystemPrompt || promptNodeText
+    let extractedDynamicContext = ''
+
+    if (rawSystemPrompt && promptNodeText !== rawSystemPrompt) {
+        // rawSystemPrompt와 완전히 일치하는 부분만 도려내고, 나머지 순수 Context를 분리
+        extractedDynamicContext = promptNodeText.replace(rawSystemPrompt, '').trim()
+    }
+
     let promptLog = ''
     if (promptNodeText) {
         if (isPromptCachedInLogs) {
-            promptLog = `  [system (PromptNode)] [PROMPT_HASH: ${promptHashStr}] (Original content omitted)\n`
+            promptLog = `  [system (PromptNode Persona)] [PROMPT_HASH: ${promptHashStr}] (Static persona omitted)\n`
         } else {
-            promptLog = `  [system (PromptNode)] [NEW_PROMPT_HASH: ${promptHashStr}]\n${promptNodeText}\n`
+            promptLog = `  [system (PromptNode Persona)] [NEW_PROMPT_HASH: ${promptHashStr}]\n${pureSystemPrompt}\n`
+        }
+        
+        if (extractedDynamicContext) {
+            promptLog += `  [system (Injected Dynamic Context)]\n${extractedDynamicContext}\n`
         }
     }
 
@@ -134,16 +146,8 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
     // ──────────────────────────────────────────────────────────
 
     // system 메시지 
+    // 시스템 (페르소나) 파트 분리
     const systemParts: Array<{ text: string }> = []
-
-    // 만약 rawSystemPrompt가 따로 넘어왔다면, 그것만을 캐싱 대상(순수 페르소나)으로 삼는다.
-    // 기존의 promptNodeText(Context가 결합된 텍스트)에서 rawSystemPrompt를 뺀 나머지(순수 Context)는 분리한다.
-    const pureSystemPrompt = rawSystemPrompt || promptNodeText
-    let extractedDynamicContext = ''
-
-    if (rawSystemPrompt && promptNodeText !== rawSystemPrompt) {
-        extractedDynamicContext = promptNodeText.replace(rawSystemPrompt, '').trim()
-    }
 
     let cacheEntry = promptHashStr ? _promptCacheMap.get(promptHashStr) : undefined
     let cachedContentName = cacheEntry?.status === 'active' ? cacheEntry.name : undefined

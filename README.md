@@ -263,11 +263,16 @@ Airi 데스크톱(Tamagotchi) 앱은 **메인 캐릭터 창(`windows:main`)**과
 - **조치**: `false &&` 조건을 삭제하여, `chatContextStore`에 Ingest 된 메모리 텍스트들이 정상적으로 시스템 프롬프트와 유저 채팅 사이에 삽입되도록 파이프라인을 복구.
 
 #### 5. Gemini 시스템 프롬프트 캐싱 타격 및 Prompt Injection 방어 [해결됨]
-- **현상**: 동적 컨텍스트(Hot Context)를 시스템 프롬프트에 직접 Append 하거나 새로운 `[system]` 메시지를 배열에 밀어 넣었을 때, Gemini API Native Caching(`systemInstruction`)이 깨져서 매 코스트마다 비싼 캐시를 재생성하거나, `[system]` 블록이 여러 개 생성되어 보안 필터(Prompt Injection 방어)에 막히는 문제 발생.
-- **해결 패턴 (Decoupling)**:
-  - 변하지 않는 순수 오리지널 페르소나는 `rawSystemPrompt`로 분리하여 Gemini SDK의 `systemInstruction` (API Caching 타겟)으로 전송.
-  - 자주 변하는 동적 Context 문자열은 여기서 빼내어 **가장 첫 번째 유저 메시지(`[user]`)의 맨 상단 텍스트 앞에 덧붙이도록(Prepend) 설계**.
-- **결과**: `logger.ts`의 해시 중복 스팸방지도 정상 작동하며, LLM 응답 지연 단축 및 토큰 절약 Caching 기능이 완벽 복구됨.
+- **현상**: 동적 컨텍스트(Hot Context)를 시스템 프롬프트에 직접 Append 하거나 새로운 `[system]` 메시지를 배열에 밀어 넣었을 때, Gemini API Native Caching(`systemInstruction`)이 깨져서 매 코스트마다 비싼 캐시를 재생성하거나, `[system]` 블록이 여러 개 생성되어 보안 필터(Prompt Injection 방어)에 막히는 문제 발생. 더불어 구글 서버가 `systemInstruction`을 제대로 인식하지 못해 `total_token_count=0` 에러가 나는 스펙 상이 문제도 존재했음.
+- **해결 패턴 (Decoupling & State Tracking)**:
+  - **페이로드 독립:** 변하지 않는 순수 오리지널 페르소나는 `rawSystemPrompt`로 분리하여 Gemini SDK의 `systemInstruction` (API Caching 타겟)으로 전송. (최신 V1Beta 스펙에 맞춰 `config: { systemInstruction }` 객체 내부로 전달하여 `token=0` 이슈 해결)
+  - **가변 컨텍스트 우회:** 자주 변하는 동적 Context 문자열은 여기서 빼내어 **가장 첫 번째 유저 메시지(`[user]`)의 맨 상단 텍스트 앞에 덧붙이도록(Prepend) 설계**.
+  - **지능형 캐시 생명주기 관리 (TTL Auto-Renewal):** 단순한 해시맵이던 추적 구조를 `PromptCacheEntry` 객체로 격상시켜 상태(`active`, `failed`, `too_short`)와 만료시간(`expireTimeMs`)을 기억하게 함.
+    - 한번 길이가 짧거나 에러가 나서 실패한 캐시 생성 턴은 멍청하게 리트라이하지 않고 무음 스킵함.
+    - 캐시 수명(10분)이 1분 미만으로 남은 시점에 채팅이 오면, 백그라운드에서 구글 서버에 `caches.update`를 날려 수명을 자동으로 10분 더 연장함.
+    - 만약 수명이 이미 초과된 지 오래거나 통신 거부가 났을 경우, 그 즉시 폐기선언을 하고 해당 턴의 바로 아랫줄 로직으로 폴백하여 **1초의 지연도 없이 즉시 새 캐시 10분짜리를 구워냄**.
+  - **로깅 리미트 해제:** `llm.log`에 찍히는 응답 텍스트의 800자(`...`) 제한을 없애 풀 텍스트 조망 가능.
+- **결과**: `logger.ts`의 해시 중복 스팸방지도 정상 작동하며, LLM 응답 지연 단축 및 토큰 절약 Caching 기능이 완벽 복구됨. 불필요한 콘솔 스팸도 압도적으로 줄어듦.
 
 #### 6. Hot Context (app-hot-context) 파일 초기 로드 지연 현상 [해결됨]
 - **현상**: 앱을 켠 후 `hot_context.md` 파일이 5초 이상 늦게 인식되어 프롬프트에 뒤늦게 합류함.
