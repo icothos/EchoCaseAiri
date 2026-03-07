@@ -103,15 +103,28 @@ export function mountEchoMemory(
             summarizer.addMessage('user', result.cleanText || text)
         }
 
-        // Hot Context 주입
+        // Hot Context 주입: 동일 SourceKey에서 Overwrite 되지 않도록 하나로 병합하여 주입
         const topNodes = pool.getTopK()
-        for (const node of topNodes) {
+        if (topNodes.length > 0) {
+            const combinedContent = topNodes.map(node => `[Echo 기억] ${node.content}`).join('\n\n')
             const id = nanoid()
             chatContextStore.ingestContextMessage({
                 id,
                 contextId: id,
-                role: 'user',
-                content: `[Echo 기억] ${node.content}`,
+                role: 'system',
+                source: 'echo-memory', // 강제로 Source 명시 (Grouping 용)
+                content: combinedContent,
+                strategy: ContextUpdateStrategy.ReplaceSelf,
+                createdAt: Date.now(),
+            })
+        } else {
+            // 노드가 없을 경우 빈 값으로 덮어씌워 초기화
+            chatContextStore.ingestContextMessage({
+                id: 'empty',
+                contextId: 'empty',
+                role: 'system',
+                source: 'echo-memory',
+                content: '',
                 strategy: ContextUpdateStrategy.ReplaceSelf,
                 createdAt: Date.now(),
             })

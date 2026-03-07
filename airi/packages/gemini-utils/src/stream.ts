@@ -32,6 +32,8 @@ export interface GeminiStreamOptions {
     apiKey: string
     model: string
     promptNode?: { role?: string, content: unknown }
+    /** 로깅 및 캐시용으로 해시할 원본 시스템 프롬프트 (동적 컨텍스트가 섞이기 전의 순수 페르소나 설정) */
+    rawSystemPrompt?: string
     messages: Array<{ role: string, content: unknown }>
     tools?: Array<{
         name: string
@@ -55,7 +57,7 @@ export type GeminiStreamChunk
  * - GeminiStreamChunk 이벤트를 onEvent 콜백으로 전달
  */
 export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
-    const { apiKey, model, promptNode, messages, tools, onEvent, onLog } = opts
+    const { apiKey, model, promptNode, rawSystemPrompt, messages, tools, onEvent, onLog } = opts
     const ai = getGenAI(apiKey)
     const geminiModel = model.replace(/^models\//, '')
 
@@ -76,15 +78,18 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
             : Array.isArray(promptNode.content)
                 ? (promptNode.content as any[]).map((c: any) => c.text ?? JSON.stringify(c)).join('')
                 : JSON.stringify(promptNode.content)
+    }
 
-        if (promptNodeText.trim()) {
-            promptHashStr = cyrb53(promptNodeText).toString(16)
+    // 동적 텍스트(HotContext)가 섞이면 해시가 매번 바뀌어 로깅 도배됨. 따라서 원본 시스템 프롬프트를 해시 키로 씀
+    const textToHash = rawSystemPrompt || promptNodeText
 
-            if (_seenPromptHashes.has(promptHashStr)) {
-                isPromptCachedInLogs = true
-            } else {
-                _seenPromptHashes.add(promptHashStr)
-            }
+    if (textToHash.trim()) {
+        promptHashStr = cyrb53(textToHash).toString(16)
+
+        if (_seenPromptHashes.has(promptHashStr)) {
+            isPromptCachedInLogs = true
+        } else {
+            _seenPromptHashes.add(promptHashStr)
         }
     }
 
@@ -125,21 +130,30 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
 
     // system 메시지 
     const systemParts: Array<{ text: string }> = []
+    
+    // 만약 rawSystemPrompt가 따로 넘어왔다면, 그것만을 캐싱 대상(순수 페르소나)으로 삼는다.
+    // 기존의 promptNodeText(Context가 결합된 텍스트)에서 rawSystemPrompt를 뺀 나머지(순수 Context)는 분리한다.
+    const pureSystemPrompt = rawSystemPrompt || promptNodeText
+    let extractedDynamicContext = ''
+    
+    if (rawSystemPrompt && promptNodeText !== rawSystemPrompt) {
+        extractedDynamicContext = promptNodeText.replace(rawSystemPrompt, '').trim()
+    }
 
-    // -- API Prompt Caching (gemini models natively support this for system contents >= 32768 tokens, but we use length as rough proxy or try/catch) --
     let cachedContentName = promptHashStr ? _promptCacheMap.get(promptHashStr) : undefined
 
-    if (promptNodeText && !cachedContentName) {
+    if (pureSystemPrompt && !cachedContentName) {
         // Only attempt to cache if the text seems large enough (Google requires >= 32,768 tokens usually, roughly ~100k chars for Korean/English mix)
         // If it's too small, the API returns an error, so we fallback.
-        if (promptNodeText.length >= 30000) {
+        if (pureSystemPrompt.length >= 30000) {
+            _log(`  [CACHE] Attempting to create Native API Content Cache... (Length: ${pureSystemPrompt.length} chars)`)
             try {
                 const cacheResult = await ai.caches.create({
                     model: geminiModel,
                     contents: [
                         { role: 'user', parts: [{ text: "Initializing context cache" }] } // Minimal user fallback if needed
                     ],
-                    systemInstruction: { parts: [{ text: promptNodeText }] },
+                    systemInstruction: { parts: [{ text: pureSystemPrompt }] },
                     ttl: { seconds: 600 }, // 10 minutes TTL
                 } as any)
 
@@ -152,25 +166,38 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
                 // Ignore API cache creation errors (e.g. content too short, quota exceeded) and fallback
                 _log(`  [CACHE] Native API caching failed/skipped. Falling back to inline systemInstruction. Reason: ${err?.message}`)
             }
+        } else {
+             _log(`  [CACHE] Skipped Native API Caching: System prompt length (${pureSystemPrompt.length} chars) is too short. (Gemini requires ~32,768+ tokens)`)
         }
+    } else if (cachedContentName) {
+         _log(`  [CACHE] Reusing existing API CachedContent: ${cachedContentName}`)
     }
 
-    if (promptNodeText && !cachedContentName) {
-        systemParts.push({ text: promptNodeText })
+    if (pureSystemPrompt && !cachedContentName) {
+        systemParts.push({ text: pureSystemPrompt })
     }
 
     const contents = messages
         .filter(m => m.role !== 'system')
-        .map(m => ({
-            role: (m.role === 'assistant' ? 'model' : 'user') as 'user' | 'model',
-            parts: [{
-                text: typeof m.content === 'string'
-                    ? m.content
-                    : Array.isArray(m.content)
-                        ? (m.content as any[]).map((c: any) => c.text ?? JSON.stringify(c)).join('')
-                        : JSON.stringify(m.content),
-            }],
-        }))
+        .map((m, idx) => {
+            let textValue = typeof m.content === 'string'
+                ? m.content
+                : Array.isArray(m.content)
+                    ? (m.content as any[]).map((c: any) => c.text ?? JSON.stringify(c)).join('')
+                    : JSON.stringify(m.content)
+
+            // 만약 분리해 낸 동적 컨텍스트가 존재한다면, 가장 첫 번째 유저 메시지 텍스트 맨 앞에 삽입하여 시스템 페르소나 캐싱과 역할을 우회 분리
+            if (idx === 0 && extractedDynamicContext) {
+                textValue = extractedDynamicContext + '\n\n' + textValue
+            }
+
+            return {
+                role: (m.role === 'assistant' ? 'model' : 'user') as 'user' | 'model',
+                parts: [{
+                    text: textValue,
+                }],
+            }
+        })
 
     const functionDeclarations = tools && tools.length > 0
         ? tools.map(t => ({

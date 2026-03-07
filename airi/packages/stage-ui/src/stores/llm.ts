@@ -24,6 +24,8 @@ export interface StreamOptions {
   supportsTools?: boolean
   waitForTools?: boolean // when true, won't resolve on finishReason=='tool_calls'
   tools?: Tool[] | (() => Promise<Tool[] | undefined>)
+  /** 로깅 밎 해싱용 순수 원본 시스템 프롬프트 (동적 컨텍스트 제외) */
+  rawSystemPrompt?: string
 }
 
 // TODO: proper format for other error messages.
@@ -45,6 +47,7 @@ function streamOptionsToolsCompatibilityOk(model: string, chatProvider: ChatProv
 
 async function streamFrom(model: string, chatProvider: ChatProvider, promptNode: Message, messages: Message[], options?: StreamOptions) {
   const headers = options?.headers
+  const rawSystemPrompt = options?.rawSystemPrompt
 
   const sanitized = sanitizeMessages(messages as unknown[])
   const resolveTools = async () => {
@@ -112,6 +115,7 @@ async function streamFrom(model: string, chatProvider: ChatProvider, promptNode:
           tools,
           event => onEvent(event as any),
           line => { (window as any).logLLM?.(line) },
+          rawSystemPrompt
         ).catch(rejectOnce)
         return
       }

@@ -65,7 +65,11 @@ export function useHotContextManager() {
     if (typeof (window as any).fsReadFile !== 'function') return
 
     const pool = getHotPool()
-    if (!pool) return // Wait until echo memory is mounted
+    if (!pool) {
+      // If pool isn't ready on initial load, retry quickly before the 5s interval
+      setTimeout(pollHotContext, 1000)
+      return
+    }
 
     try {
       const fileData = await (window as any).fsReadFile(hotContextFileName)

@@ -325,25 +325,14 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       })
 
       const contextsSnapshot = chatContext.getContextsSnapshot()
-      if (Object.keys(contextsSnapshot).length > 0) {
-        const system = newMessages.slice(0, 1)
-        const afterSystem = newMessages.slice(1, newMessages.length)
+      const validContexts = Object.values(contextsSnapshot)
+        .flat()
+        .filter(msg => msg.content && String(msg.content).trim() !== '')
+        .map(msg => String(msg.content).trim())
 
-        newMessages = [
-          ...system,
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: ''
-                  + 'These are the contextual information retrieved or on-demand updated from other modules, you may use them as context for chat, or reference of the next action, tool call, etc.:\n'
-                  + `${Object.entries(contextsSnapshot).map(([key, value]) => `Module ${key}: ${JSON.stringify(value)}`).join('\n')}\n`,
-              },
-            ],
-          },
-          ...afterSystem,
-        ]
+      let contextTextForSystem = ''
+      if (validContexts.length > 0) {
+        contextTextForSystem = '\n\n💡 [현재 참고할 상황/문맥 (Context)]\n' + validContexts.join('\n\n')
       }
 
       if (options.isAutoSpeak && autoSpeakContext && newMessages.length > 0) {
@@ -382,12 +371,32 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         return
       }
 
-      const promptNode = chatSession.getPromptNode(options.promptOptions) as Message
+      const rawPromptNode = chatSession.getPromptNode(options.promptOptions) as Message
+      
+      // Inject unified context blocks directly into the root system prompt to avoid multi-system prompt injection filters
+      const promptNode = JSON.parse(JSON.stringify(rawPromptNode))
+      
+      let rawSystemPromptString = ''
+      if (rawPromptNode && rawPromptNode.content) {
+        rawSystemPromptString = typeof rawPromptNode.content === 'string'
+            ? rawPromptNode.content
+            : Array.isArray(rawPromptNode.content)
+                ? (rawPromptNode.content as any[]).map((c: any) => c.text ?? JSON.stringify(c)).join('')
+                : JSON.stringify(rawPromptNode.content)
+      }
 
+      if (contextTextForSystem) {
+        if (Array.isArray(promptNode.content)) {
+          promptNode.content.push({ type: 'text', text: contextTextForSystem })
+        } else {
+          promptNode.content = String(promptNode.content || '') + contextTextForSystem
+        }
+      }
 
       try {
         await llmStore.stream(options.model, options.chatProvider, promptNode, newMessages as Message[], {
           headers,
+          rawSystemPrompt: rawSystemPromptString,
           tools: options.tools,
           onStreamEvent: async (event: StreamEvent) => {
             switch (event.type) {
