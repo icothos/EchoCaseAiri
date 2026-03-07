@@ -46,7 +46,7 @@ export function useHotContextManager() {
               weight: 100, // High weight so it's always included
               ttl: 999999999, // Effectively infinite TTL
               createdAt: mtimeMs,
-              nodeType: 'chat' // General context
+              nodeType: 'context_summary' // 구조화된 요약 노드로 취급
             })
             console.info('[HotContextManager] Ingested Run Context into Echo Memory Pool.')
           }
@@ -91,7 +91,7 @@ export function useHotContextManager() {
                 weight: 90,
                 ttl: 999999999, // Infinite TTL
                 createdAt: mtimeMs,
-                nodeType: 'chat'
+                nodeType: 'context_summary'
              })
           }
         } else {
@@ -101,7 +101,7 @@ export function useHotContextManager() {
             weight: 90, // High weight to be prioritized over older chat nodes
             ttl: 999999999, // Infinite TTL
             createdAt: mtimeMs, // Tie creation to file modification
-            nodeType: 'chat'
+            nodeType: 'context_summary'
           })
         }
       } else {

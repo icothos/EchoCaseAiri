@@ -142,7 +142,7 @@ export function mountEchoMemory(
         )
 
         if (progressText)
-            pool.updateTopNode({ progressSummary: progressText }, 'context_summary')
+            pool.updateTopNode({ progressSummary: [progressText] }, 'context_summary')
         else
             pool.updateTopContextProgress(outputText.slice(0, 80))
 

@@ -183,8 +183,8 @@ export function createSummarizer(
                 topic: result.topic,
                 speaker: result.speaker,
                 contextSummary: result.contextSummary,
-                progressSummary: result.progressSummary,
-                mood: result.mood,
+                progressSummary: result.progressSummary ? [result.progressSummary] : [],
+                mood: result.mood ? [result.mood] : [],
             })
         }
     }

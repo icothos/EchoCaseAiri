@@ -18,12 +18,18 @@ export interface ContextNode {
     nodeType: NodeType
     completed: boolean
 
-    // context_summary 노드 전용 구조화 필드
+    // 원본 텍스트 보존용 (chat 노드 등에서 구조화 데이터와 조합 전 내용)
+    rawContent?: string
+
+    // context_summary 노드 전용 구조화 필드 (배열 기반 히스토리)
     topic: string
     speaker: string
-    contextSummary: string   // 어떤 맥락이었는지 (1~2문장)
-    progressSummary: string  // 어디까지 이야기했는지 / 다음 예상 흐름
-    mood: string             // 분위기 (2~4 한국어 글자)
+    contextSummary: string   // 처음 배경 맥락 (단일)
+    progressSummary: string[] // 어디까지 이야기했는지 시계열 누적 배열
+    mood: string[]             // 분위기 시계열 누적 배열
+
+    // 긴 내용 수동 덮어쓰기(요약/플러시) 시 과거 히스토리를 무시하기 위한 상태값
+    isContentFrozen?: boolean
 }
 
 export interface BouncerResult {
