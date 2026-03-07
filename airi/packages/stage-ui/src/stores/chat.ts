@@ -236,7 +236,9 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       chatSession.appendSessionMessage(sessionId, { role: 'user', content: finalContent, createdAt: sendingCreatedAt, id: nanoid() })
 
       // LLM 호출용 메시지는 append 이후 최신 배열을 다시 읽음
-      const sessionMessagesForSend = chatSession.getSessionMessages(sessionId)
+      // 토큰 낭비 및 컨텍스트 초과 방지를 위해 최근 N개의 메시지만 잘라서 전송 (기본값 40개)
+      const historyLimit = Number(import.meta.env.VITE_CHAT_HISTORY_LIMIT || 40)
+      const sessionMessagesForSend = chatSession.getSessionMessages(sessionId).slice(-historyLimit)
 
       const categorizer = createStreamingCategorizer(activeProvider.value)
       let streamPosition = 0
