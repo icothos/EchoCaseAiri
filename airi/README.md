@@ -491,6 +491,30 @@ VITE_GEMINI_API_KEY=your-api-key-here
 
 ---
 
+## Chzzk Adapter (치지직 연동)
+
+> **로컬 포크 전용** — `packages/chzzk-adapter`에 위치한 커스텀 치지직(Chzzk) 채팅 연동 어댑터입니다.
+
+Airi의 로컬 WebSocket 통신 서버(포트 6121)와 통신하여 치지직 방송의 실시간 채팅을 Airi 엔진으로 넘겨줍니다.
+
+### 주요 기능
+
+- **치지직 비공식 API 연동**: 네이버 로그인 세션(`NID_AUT`, `NID_SES`)을 사용하여 치지직 채팅 채널을 청취합니다.
+- **자동 재연결 메커니즘**: Airi의 `server-runtime` 측 서버가 아직 열리지 않았을 때 지수 백오프(Exponential Backoff) 방식을 통해 백그라운드에서 끊임없이 재연결을 시도합니다.
+
+### 패치 내역 (로컬 수정)
+
+최근 로컬 환경에서 다음과 같은 치명적인 통신 버그 2종을 수정하여 어댑터 연동을 안정화했습니다.
+
+1. **에러 1: `global.WebSocket is not defined`**
+   - **원인**: 데스크톱 버전(`stage-tamagotchi`)의 메인 사이드(Node.js)에는 크롬과 달리 네이티브 웹소켓이 존재하지 않아 연결 거부됨.
+   - **해결**: `apps/stage-tamagotchi/src/main/index.ts` 최상단에 `ws` 라이브러리의 `WebSocket` 구현체를 전역(Global) 폴리필로 강제 주입.
+2. **에러 2: `[injeca] RUNNING` 이후 서버 포트(6121)가 안 열리는 증상**
+   - **원인**: 의존성 트리 로딩 메서드인 `injeca.start()`에 비동기 대기(`await`) 키워드가 누락되어, 모듈들이 다 켜지기도 전에 (서버 리스너가 리스트에 등록되기도 전에) `emitAppReady()` 생명주기 훅이 0초 만에 스킵 되어버리는 레이스 컨디션 발생.
+   - **해결**: `await injeca.start()`로 비동기 대기를 추가하여, 정확히 앱 렌더러가 모두 열린 후 6121 서버 포트가 정상 오픈되도록 수정.
+
+---
+
 ## ⚠️ 중요: 다중 윈도우(Multi-Window) 아키텍처 디버깅 가이드 (Airi 특이점)
 
 Airi 데스크톱(Tamagotchi) 앱은 **메인 캐릭터 창(`windows:main`)**과 **채팅 팝업 창(`windows:chat`)**이 서로 완전히 분리된 렌더러(Renderer) 프로세스 공간을 가집니다. 이 구조를 인지하지 못하면 심각한 디버깅 혼란(Silent Failure)을 겪을 수 있습니다.
