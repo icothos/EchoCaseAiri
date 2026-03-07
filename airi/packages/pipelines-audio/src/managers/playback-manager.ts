@@ -260,6 +260,15 @@ export function createPlaybackManager<TAudio>(options: PlaybackManagerOptions<TA
     }
   }
 
+  function clearWaiting(reason: string) {
+    for (let i = waiting.length - 1; i >= 0; i -= 1) {
+      if (waiting[i]) {
+        emitReject(waiting[i]!.item, reason)
+      }
+    }
+    waiting.length = 0
+  }
+
   function stopByOwner(ownerId: string, reason: string) {
     for (const entry of active.values()) {
       if (entry.item.ownerId !== ownerId)
@@ -286,6 +295,7 @@ export function createPlaybackManager<TAudio>(options: PlaybackManagerOptions<TA
     stopAll,
     stopByIntent,
     clearWaitingByIntent,
+    clearWaiting,
     stopByOwner,
     onStart,
     onEnd,

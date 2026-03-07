@@ -31,12 +31,21 @@ export interface SpeechIntentCancelPayload {
   reason?: string
 }
 
+export interface SpeechIntentStopAllPayload {
+  originId: string
+  reason?: string
+  options?: {
+    keepActive?: boolean
+  }
+}
+
 export const speechIntentStartEvent = defineEventa<SpeechIntentStartPayload>('eventa:audio:speech:intent:start')
 export const speechIntentLiteralEvent = defineEventa<SpeechIntentTokenPayload>('eventa:audio:speech:intent:literal')
 export const speechIntentSpecialEvent = defineEventa<SpeechIntentTokenPayload>('eventa:audio:speech:intent:special')
 export const speechIntentFlushEvent = defineEventa<SpeechIntentTokenPayload>('eventa:audio:speech:intent:flush')
 export const speechIntentEndEvent = defineEventa<SpeechIntentEndPayload>('eventa:audio:speech:intent:end')
 export const speechIntentCancelEvent = defineEventa<SpeechIntentCancelPayload>('eventa:audio:speech:intent:cancel')
+export const speechIntentStopAllEvent = defineEventa<SpeechIntentStopAllPayload>('eventa:audio:speech:intent:stop-all')
 
 const BUS_CHANNEL_NAME = 'proj-airi:pipelines:outputs:speech'
 

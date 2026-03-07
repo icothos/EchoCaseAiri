@@ -25,6 +25,10 @@ export const useSpeechRuntimeStore = defineStore('speech-runtime', () => {
     return runtime.getActiveCount()
   }
 
+  function interruptAll(reason?: string, options?: { keepActive?: boolean }) {
+    return runtime.interruptAll(reason, options)
+  }
+
   async function dispose() {
     await runtime.dispose()
   }
@@ -35,6 +39,7 @@ export const useSpeechRuntimeStore = defineStore('speech-runtime', () => {
     isHost,
     isProcessing,
     getActiveCount,
+    interruptAll,
     dispose,
   }
 })

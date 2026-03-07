@@ -28,6 +28,7 @@ export interface SpeechPipelineOptions<TAudio> {
     stopByIntent: (intentId: string, reason: string) => void
     clearWaitingByIntent?: (intentId: string, reason: string) => void
     stopByOwner: (ownerId: string, reason: string) => void
+    clearWaiting?: (reason: string) => void
     onStart: (listener: (event: { item: PlaybackItem<TAudio>, startedAt: number }) => void) => void
     onEnd: (listener: (event: { item: PlaybackItem<TAudio>, endedAt: number }) => void) => void
     onInterrupt: (listener: (event: { item: PlaybackItem<TAudio>, reason: string, interruptedAt: number }) => void) => void
@@ -381,11 +382,31 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
     options.playback.stopAll(reason)
   }
 
+  function interruptAll(reason: string, optionsInput?: { keepActive?: boolean }) {
+    for (const intent of intents.values()) {
+      intent.canceled = true
+      intent.controller.abort(reason)
+      intent.closeStream()
+    }
+    pending.length = 0
+    intents.clear()
+    activeIntent = null
+
+    if (optionsInput?.keepActive) {
+      if (options.playback.clearWaiting) {
+        options.playback.clearWaiting(reason)
+      }
+    } else {
+      options.playback.stopAll(reason)
+    }
+  }
+
   return {
     openIntent,
     cancelIntent,
     interrupt,
     stopAll,
+    interruptAll,
     isProcessing: () => intents.size > 0 || activeIntent !== null,
     getActiveCount: () => options.playback.getActiveCount ? options.playback.getActiveCount() : 0,
     on<K extends SpeechPipelineEventName>(event: K, listener: SpeechPipelineEvents<TAudio>[K]) {

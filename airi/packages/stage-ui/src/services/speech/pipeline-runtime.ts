@@ -14,6 +14,7 @@ import {
   speechIntentLiteralEvent,
   speechIntentSpecialEvent,
   speechIntentStartEvent,
+  speechIntentStopAllEvent,
 } from './bus'
 
 function createId(prefix: string) {
@@ -26,6 +27,7 @@ export interface SpeechPipelineRuntime {
   isHost: () => boolean
   isProcessing: () => boolean
   getActiveCount: () => number
+  interruptAll: (reason?: string, options?: { keepActive?: boolean }) => void
   dispose: () => Promise<void>
 }
 
@@ -134,6 +136,20 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
         return
       intent.cancel(payload.reason)
       remoteIntentMap.delete(payload.intentId)
+    })
+
+    context.on(speechIntentStopAllEvent, (evt) => {
+      const payload = evt?.body
+      if (!payload || payload.originId === originId)
+        return
+      if (!hostPipeline)
+        return
+      
+      hostPipeline.interruptAll(payload.reason ?? 'canceled', payload.options)
+      for (const intent of remoteIntentMap.values()) {
+        intent.cancel(payload.reason)
+      }
+      remoteIntentMap.clear()
     })
   }
 
@@ -271,12 +287,30 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
     return hostPipeline ? hostPipeline.getActiveCount() : 0
   }
 
+  function interruptAll(reason?: string, options?: { keepActive?: boolean }) {
+    if (hostPipeline) {
+      hostPipeline.interruptAll(reason ?? 'canceled', options)
+      for (const intent of remoteIntentMap.values()) {
+        intent.cancel(reason)
+      }
+      remoteIntentMap.clear()
+      return
+    }
+
+    context.emit(speechIntentStopAllEvent, {
+      originId,
+      reason,
+      options,
+    })
+  }
+
   return {
     openIntent,
     registerHost,
     isHost,
     isProcessing,
     getActiveCount,
+    interruptAll,
     dispose,
   }
 }

@@ -527,9 +527,9 @@ chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
   }
 
   if (currentChatIntent.value) {
-    currentChatIntent.value.cancel('new-message', { keepActive: !hardInterrupt.value })
     currentChatIntent.value = null
   }
+  speechRuntimeStore.interruptAll('new-message', { keepActive: !hardInterrupt.value })
 
   const sessionId = context.sessionId
   currentChatIntent.value = speechRuntimeStore.openIntent({
