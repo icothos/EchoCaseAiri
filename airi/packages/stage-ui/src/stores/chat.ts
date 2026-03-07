@@ -325,8 +325,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
       })
 
       const contextsSnapshot = chatContext.getContextsSnapshot()
-      // Disabled context snapshot injection per user request (temporary bypass)
-      if (false && Object.keys(contextsSnapshot).length > 0) {
+      if (Object.keys(contextsSnapshot).length > 0) {
         const system = newMessages.slice(0, 1)
         const afterSystem = newMessages.slice(1, newMessages.length)
 

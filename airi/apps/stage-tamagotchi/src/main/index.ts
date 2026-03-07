@@ -48,22 +48,22 @@ function getLogsDir(): string {
   return _logsDir
 }
 
+// 앱 실행 시점 기준으로 고유한 실행 ID(타임스탬프) 생성
+const RUN_ID = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+
 ipcMain.handle('log:llm', (_event, line: string) => {
   try {
-    appendFileSync(join(getLogsDir(), 'llm.log'), line + '\n', 'utf-8')
+    appendFileSync(join(getLogsDir(), `llm_${RUN_ID}.log`), line + '\n', 'utf-8')
   }
   catch { /* 로그 실패는 무시 */ }
 })
 
 ipcMain.handle('log:chat', (_event, line: string) => {
   try {
-    appendFileSync(join(getLogsDir(), 'chat.log'), line + '\n', 'utf-8')
+    appendFileSync(join(getLogsDir(), `chat_${RUN_ID}.log`), line + '\n', 'utf-8')
   }
   catch { /* 로그 실패는 무시 */ }
 })
-
-// 앱 실행 시점 기준으로 고유한 실행 ID(타임스탬프) 생성
-const RUN_ID = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
 
 ipcMain.handle('log:memory', (_event, line: string) => {
   try {
