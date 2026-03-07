@@ -48,6 +48,7 @@ export interface GeminiStreamOptions {
     onEvent: (event: GeminiStreamChunk) => Promise<void>
     /** 로그 라인 콜백 — console.debug는 항상 출력, 이 콜백으로 추가 처리 가능 */
     onLog?: (line: string) => void
+    attachSearchTools?: boolean
 }
 
 export type GeminiStreamChunk
@@ -62,7 +63,7 @@ export type GeminiStreamChunk
  * - GeminiStreamChunk 이벤트를 onEvent 콜백으로 전달
  */
 export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
-    const { apiKey, model, promptNode, rawSystemPrompt, messages, tools, onEvent, onLog } = opts
+    const { apiKey, model, promptNode, rawSystemPrompt, messages, tools, onEvent, onLog, attachSearchTools } = opts
     const ai = getGenAI(apiKey)
     const geminiModel = model.replace(/^models\//, '')
 
@@ -267,12 +268,20 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
         }))
         : undefined
 
+    const mergedTools: Array<any> = []
+    if (functionDeclarations) {
+        mergedTools.push({ functionDeclarations })
+    }
+    if (attachSearchTools) {
+        mergedTools.push({ googleSearch: {} })
+    }
+
     const response = await ai.models.generateContentStream({
         model: geminiModel,
         contents: contents as any,
         config: {
             ...(systemParts.length > 0 ? { systemInstruction: { parts: systemParts } } : {}),
-            ...(functionDeclarations ? { tools: [{ functionDeclarations }] } : {}),
+            ...(mergedTools.length > 0 ? { tools: mergedTools } : {}),
         },
         ...(cachedContentName ? { cachedContent: cachedContentName } : {}),
     } as any)

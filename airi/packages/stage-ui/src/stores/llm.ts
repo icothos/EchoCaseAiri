@@ -106,6 +106,9 @@ async function streamFrom(model: string, chatProvider: ChatProvider, promptNode:
       // ── Gemini native SDK 경로 ────────────────────────────────
       if (isGeminiProvider(chatProvider, model)) {
         const apiKey = (import.meta.env as any).VITE_GEMINI_API_KEY as string | undefined
+        const searchMode = ((import.meta.env as any).VITE_GEMINI_SEARCH_MODE as string | undefined) || 'none'
+        const attachSearchTools = searchMode === 'always' || (searchMode === 'rag' && hasRagIntent)
+
         if (!apiKey) {
           rejectOnce(new Error('VITE_GEMINI_API_KEY is not set'))
           return
@@ -118,7 +121,8 @@ async function streamFrom(model: string, chatProvider: ChatProvider, promptNode:
           tools,
           event => onEvent(event as any),
           line => { (window as any).logLLM?.(line) },
-          rawSystemPrompt
+          rawSystemPrompt,
+          attachSearchTools
         ).catch(rejectOnce)
         return
       }

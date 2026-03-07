@@ -45,7 +45,8 @@ export async function streamGeminiNative(
     tools: Tool[] | undefined,
     onEvent: (event: any) => Promise<void>,
     onLog?: (line: string) => void,
-    rawSystemPrompt?: string
+    rawSystemPrompt?: string,
+    attachSearchTools?: boolean
 ): Promise<void> {
     // xsai Tool → gemini-utils 포맷 변환
     const geminiTools = tools && tools.length > 0
@@ -64,6 +65,7 @@ export async function streamGeminiNative(
         tools: geminiTools,
         onEvent,
         onLog,
-        rawSystemPrompt
+        rawSystemPrompt,
+        attachSearchTools
     })
 }
