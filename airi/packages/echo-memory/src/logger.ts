@@ -21,11 +21,26 @@ export interface LLMLogEntry {
     durationMs?: number
     /** 요청 입력 텍스트 요약 (Bouncer: 원문, Summarizer: 로그 앞 50자) */
     inputPreview?: string
+    /** 시스템 프롬프트 전체 내용 (최초 로깅시에만 출력됨) */
+    systemPrompt?: string
+    /** 시스템 프롬프트 해시값 */
+    systemHash?: string
+    /** 로깅 요청/응답 페어링 ID */
+    reqId?: string
 }
 
+function getShortHash(str: string): string {
+    let h = 5381
+    for (let i = 0; i < str.length; i++)
+        h = ((h << 5) + h) ^ str.charCodeAt(i)
+    return (h >>> 0).toString(16).padStart(8, '0')
+}
+
+const _seenSystemHashes = new Set<string>()
+
 export interface LLMLogger {
-    request: (role: LLMRole, content: string, model?: string, inputPreview?: string) => number
-    response: (role: LLMRole, content: string, startedAt: number, model?: string) => void
+    request: (role: LLMRole, content: string, model?: string, inputPreview?: string, systemPrompt?: string) => string
+    response: (role: LLMRole, content: string, reqId: string, model?: string) => void
     onLog?: (entry: LLMLogEntry) => void
 }
 
@@ -48,55 +63,84 @@ export function createLLMLogger(options?: {
 }) {
     const prefix = options?.prefix ?? '[echo-memory]'
     const silent = options?.silent ?? false
+    let _reqCounter = 0
+    const _pendingRequests = new Map<string, number>()
 
-    function fmt(entry: LLMLogEntry): string {
+    function fmt(entry: LLMLogEntry, truncateContent = false): string {
         const ts = new Date(entry.timestamp).toISOString().slice(11, 23) // HH:MM:SS.mmm
         const dir = entry.direction === 'REQUEST' ? '→' : '←'
         const dur = entry.durationMs !== undefined ? ` (${entry.durationMs}ms)` : ''
         const model = entry.model ? ` [${entry.model}]` : ''
         const preview = entry.inputPreview ? ` | input: ${entry.inputPreview.slice(0, 60)}` : ''
-        return `${prefix} ${ts} [${entry.role}]${model} ${dir}${dur}${preview}\n  ${entry.content.slice(0, 300)}`
+
+        let systemStr = ''
+        if (entry.systemPrompt && entry.systemHash) {
+            if (!_seenSystemHashes.has(entry.systemHash)) {
+                _seenSystemHashes.add(entry.systemHash)
+                systemStr = `\n  [System Prompt Hash: ${entry.systemHash}]\n  ${entry.systemPrompt}`
+            }
+            else {
+                systemStr = `\n  [System Prompt Hash: ${entry.systemHash}] (Omitted)`
+            }
+        }
+
+        const displayContent = truncateContent
+            ? (entry.content.length > 300 ? entry.content.slice(0, 300) + '...' : entry.content)
+            : entry.content
+
+        const reqTag = entry.reqId ? `[#${entry.reqId}] ` : ''
+
+        return `${prefix} ${ts} ${reqTag}[${entry.role}]${model} ${dir}${dur}${preview}${systemStr}\n  ${displayContent}`
     }
 
     function emit(entry: LLMLogEntry) {
         if (!silent) {
             if (entry.direction === 'REQUEST') {
-                console.debug(fmt(entry))
+                console.debug(fmt(entry, true))
             }
             else {
                 const ok = !entry.content.includes('error')
-                console.debug(fmt(entry))
+                console.debug(fmt(entry, true))
                 if (!ok)
-                    console.warn(`${prefix} [${entry.role}] 응답 파싱 주의:`, entry.content.slice(0, 200))
+                    console.warn(`${prefix} [${entry.role}] 응답 파싱 주의:\n`, entry.content)
             }
         }
         options?.onLog?.(entry)
     }
 
     /**
-     * 요청 로그 기록. 시작 타임스탬프 반환 (response()에 전달).
+     * 요청 로그 기록. 고유 reqId 반환 (response()에 전달).
      */
     function request(
         role: LLMRole,
         content: string,
         model?: string,
         inputPreview?: string,
-    ): number {
+        systemPrompt?: string,
+    ): string {
         const timestamp = Date.now()
-        emit({ role, direction: 'REQUEST', timestamp, content, model, inputPreview })
-        return timestamp
+        _reqCounter++
+        const reqId = _reqCounter.toString().padStart(4, '0')
+        _pendingRequests.set(reqId, timestamp)
+
+        const systemHash = systemPrompt ? getShortHash(systemPrompt) : undefined
+        emit({ role, direction: 'REQUEST', timestamp, content, model, inputPreview, systemPrompt, systemHash, reqId })
+        return reqId
     }
 
     /**
-     * 응답 로그 기록. startedAt = request()가 반환한 타임스탬프.
+     * 응답 로그 기록. reqId = request()가 반환한 ID.
      */
     function response(
         role: LLMRole,
         content: string,
-        startedAt: number,
+        reqId: string,
         model?: string,
     ): void {
         const timestamp = Date.now()
+        const startedAt = _pendingRequests.get(reqId) ?? timestamp
+        _pendingRequests.delete(reqId)
+
         emit({
             role,
             direction: 'RESPONSE',
@@ -104,6 +148,7 @@ export function createLLMLogger(options?: {
             content,
             model,
             durationMs: timestamp - startedAt,
+            reqId,
         })
     }
 

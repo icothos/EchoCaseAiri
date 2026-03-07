@@ -4,6 +4,8 @@ import { useChatOrchestratorStore } from '../stores/chat'
 // A flag to ensure we don't try to mount multiple times if called concurrently
 let isEchoMemoryMounting = false
 
+const _seenSystemHashesForFile = new Set<string>()
+
 export async function setupEchoMemory() {
     if (typeof window === 'undefined') return
     if ((window as any).__echoMemory) {
@@ -23,16 +25,28 @@ export async function setupEchoMemory() {
 
         const echoLogger = createLLMLogger({
             prefix: '[echo-memory]',
+            silent: true,
             onLog: (entry: any) => {
                 if (typeof (window as any).logLLM === 'function') {
                     const ts = new Date(entry.timestamp).toISOString().slice(11, 23)
                     const dir = entry.direction === 'REQUEST' ? 'REQ' : 'RES'
                     const dur = entry.durationMs !== undefined ? ` (${entry.durationMs}ms)` : ''
                     const model = entry.model ? ` [${entry.model}]` : ''
-                    const cleanContent = entry.content.replace(/\r?\n/g, ' ')
-                    const preview = entry.inputPreview ? ` | input: ${entry.inputPreview.slice(0, 60).replace(/\r?\n/g, ' ')}` : ''
+                    const cleanContent = entry.content
+                    const preview = entry.inputPreview ? ` | input: ${entry.inputPreview}` : ''
 
-                    const line = `[echo-memory] ${ts} [${entry.role}]${model} ${dir}${dur}${preview} - ${cleanContent}`
+                    let systemStr = ''
+                    if (entry.systemPrompt && entry.systemHash) {
+                        if (!_seenSystemHashesForFile.has(entry.systemHash)) {
+                            _seenSystemHashesForFile.add(entry.systemHash)
+                            systemStr = `\n  [System Prompt Hash: ${entry.systemHash}]\n  ${entry.systemPrompt}`
+                        }
+                        else {
+                            systemStr = `\n  [System Prompt Hash: ${entry.systemHash}] (Omitted)`
+                        }
+                    }
+
+                    const line = `[echo-memory] ${ts} [${entry.role}]${model} ${dir}${dur}${preview}${systemStr}\n  ${cleanContent}`
                         ; (window as any).logLLM(line).catch(() => { })
                 }
             }

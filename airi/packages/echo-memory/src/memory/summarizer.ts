@@ -58,7 +58,7 @@ export function createSummarizer(
     const pendingChunks: ChatMessage[][] = []
 
     async function callSummarizer(chatLog: string): Promise<SummarizerResult | null> {
-        const startedAt = logger.request('CONTEXT', chatLog.slice(0, 200), model, chatLog.slice(0, 60))
+        const reqId = logger.request('CONTEXT', chatLog, model, chatLog.slice(0, 60), SUMMARIZER_SYSTEM_PROMPT)
 
         try {
             let raw: string
@@ -106,7 +106,7 @@ export function createSummarizer(
                 }
             }
 
-            logger.response('CONTEXT', raw, startedAt, model)
+            logger.response('CONTEXT', raw, reqId, model)
             if (raw.startsWith('```json'))
                 raw = raw.slice(7)
             if (raw.endsWith('```'))
@@ -220,7 +220,7 @@ Output: a single Korean sentence (20-40 chars). Example output: "게임 공략 �
             ? `맥락: ${contextSummary}\n\nAI 응답:\n${aiResponse.slice(0, 600)}`
             : `AI 응답:\n${aiResponse.slice(0, 600)}`
 
-        const startedAt = logger.request('PROGRESS', userPrompt.slice(0, 100), progressModel, aiResponse.slice(0, 60))
+        const reqId = logger.request('PROGRESS', userPrompt, progressModel, aiResponse.slice(0, 60), systemPrompt)
 
         try {
             let raw: string
@@ -268,7 +268,7 @@ Output: a single Korean sentence (20-40 chars). Example output: "게임 공략 �
                 }
             }
 
-            logger.response('PROGRESS', raw, startedAt, progressModel)
+            logger.response('PROGRESS', raw, reqId, progressModel)
             return raw || null
         }
         catch (err) {

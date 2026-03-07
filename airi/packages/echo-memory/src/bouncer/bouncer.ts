@@ -45,7 +45,7 @@ export function createBouncer(options: BouncerOptions & { logger?: LLMLoggerInst
         systemPrompt: string,
         userText: string,
     ): Promise<string> {
-        const startedAt = logger.request('BOUNCER', `Viewer: ${userText}`, model)
+        const reqId = logger.request('BOUNCER', `Viewer: ${userText}`, model, undefined, systemPrompt)
 
         // Gemini native SDK 경로
         if (isGeminiUrl(baseUrl) && apiKey) {
@@ -61,11 +61,11 @@ export function createBouncer(options: BouncerOptions & { logger?: LLMLoggerInst
                     maxOutputTokens: 32,
                     timeoutMs,
                 })
-                logger.response('BOUNCER', result, startedAt, model)
+                logger.response('BOUNCER', result, reqId, model)
                 return result
             }
             catch (err) {
-                logger.response('BOUNCER', `[ERROR] ${err}`, startedAt, model)
+                logger.response('BOUNCER', `[ERROR] ${err}`, reqId, model)
                 throw err
             }
         }
@@ -95,7 +95,7 @@ export function createBouncer(options: BouncerOptions & { logger?: LLMLoggerInst
             })
             const json = await res.json() as any
             const result = (json?.choices?.[0]?.message?.content ?? '').trim()
-            logger.response('BOUNCER', result, startedAt, model)
+            logger.response('BOUNCER', result, reqId, model)
             return result
         }
         finally {
