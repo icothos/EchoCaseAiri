@@ -20,8 +20,13 @@ function cyrb53(str: string, seed = 0) {
     return 4294967296 * (2097151 & h2) + (h1 >>> 0)
 }
 
-// Global cache map to store Google GenAI Cache names by our computed prompt hash
-const _promptCacheMap = new Map<string, string>()
+// Global cache map to store Google GenAI Cache entities by our computed prompt hash
+export interface PromptCacheEntry {
+    status: 'active' | 'failed' | 'too_short'
+    name?: string
+    expireTimeMs?: number
+}
+const _promptCacheMap = new Map<string, PromptCacheEntry>()
 
 // Set of seen hashes just for logging deduplication, even if API cache fails
 const _seenPromptHashes = new Set<string>()
@@ -98,7 +103,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
     _reqCounter++
     const reqId = _reqCounter.toString().padStart(4, '0')
     const reqTag = `[#${reqId}] `
-    
+
     let promptLog = ''
     if (promptNodeText) {
         if (isPromptCachedInLogs) {
@@ -130,47 +135,86 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
 
     // system 메시지 
     const systemParts: Array<{ text: string }> = []
-    
+
     // 만약 rawSystemPrompt가 따로 넘어왔다면, 그것만을 캐싱 대상(순수 페르소나)으로 삼는다.
     // 기존의 promptNodeText(Context가 결합된 텍스트)에서 rawSystemPrompt를 뺀 나머지(순수 Context)는 분리한다.
     const pureSystemPrompt = rawSystemPrompt || promptNodeText
     let extractedDynamicContext = ''
-    
+
     if (rawSystemPrompt && promptNodeText !== rawSystemPrompt) {
         extractedDynamicContext = promptNodeText.replace(rawSystemPrompt, '').trim()
     }
 
-    let cachedContentName = promptHashStr ? _promptCacheMap.get(promptHashStr) : undefined
+    let cacheEntry = promptHashStr ? _promptCacheMap.get(promptHashStr) : undefined
+    let cachedContentName = cacheEntry?.status === 'active' ? cacheEntry.name : undefined
 
-    if (pureSystemPrompt && !cachedContentName) {
-        // Only attempt to cache if the text seems large enough (Google requires >= 32,768 tokens usually, roughly ~100k chars for Korean/English mix)
-        // If it's too small, the API returns an error, so we fallback.
-        if (pureSystemPrompt.length >= 30000) {
-            _log(`  [CACHE] Attempting to create Native API Content Cache... (Length: ${pureSystemPrompt.length} chars)`)
-            try {
-                const cacheResult = await ai.caches.create({
-                    model: geminiModel,
-                    contents: [
-                        { role: 'user', parts: [{ text: "Initializing context cache" }] } // Minimal user fallback if needed
-                    ],
-                    systemInstruction: { parts: [{ text: pureSystemPrompt }] },
-                    ttl: { seconds: 600 }, // 10 minutes TTL
-                } as any)
-
-                if (cacheResult && cacheResult.name) {
-                    cachedContentName = cacheResult.name
-                    _promptCacheMap.set(promptHashStr, cachedContentName)
-                    _log(`  [CACHE] Automatically created API CachedContent: ${cachedContentName}`)
-                }
-            } catch (err: any) {
-                // Ignore API cache creation errors (e.g. content too short, quota exceeded) and fallback
-                _log(`  [CACHE] Native API caching failed/skipped. Falling back to inline systemInstruction. Reason: ${err?.message}`)
-            }
-        } else {
-             _log(`  [CACHE] Skipped Native API Caching: System prompt length (${pureSystemPrompt.length} chars) is too short. (Gemini requires ~32,768+ tokens)`)
+    if (pureSystemPrompt) {
+        // 모델 종류에 따라 캐싱 최소 토큰 조건이 다름: Flash 계열은 1024 토큰 (약 ~3000자), Pro 계열은 4096 토큰 (약 ~12000자) 이상
+        let minCacheLength = 30000
+        if (geminiModel.includes('flash') || geminiModel.includes('flash-lite')) {
+            minCacheLength = 2000
+        } else if (geminiModel.includes('pro')) {
+            minCacheLength = 8000
         }
-    } else if (cachedContentName) {
-         _log(`  [CACHE] Reusing existing API CachedContent: ${cachedContentName}`)
+
+        if (!cacheEntry) {
+            if (pureSystemPrompt.length >= minCacheLength) {
+                _log(`  [CACHE] Attempting to create Native API Content Cache... (Length: ${pureSystemPrompt.length} chars, requires >= ${minCacheLength})`)
+                try {
+                    const ttlSeconds = 600
+                    const cacheResult = await ai.caches.create({
+                        model: geminiModel,
+                        contents: [
+                            { role: 'user', parts: [{ text: "Initializing context cache" }] } // Minimal user fallback if needed
+                        ],
+                        systemInstruction: { parts: [{ text: pureSystemPrompt }] },
+                        ttl: { seconds: ttlSeconds }, // 10 minutes TTL
+                    } as any)
+
+                    if (cacheResult && cacheResult.name) {
+                        cachedContentName = cacheResult.name
+                        _promptCacheMap.set(promptHashStr!, {
+                            status: 'active',
+                            name: cachedContentName,
+                            expireTimeMs: Date.now() + (ttlSeconds * 1000)
+                        })
+                        _log(`  [CACHE] Automatically created API CachedContent: ${cachedContentName} (Expires in ${ttlSeconds}s)`)
+                    }
+                } catch (err: any) {
+                    _promptCacheMap.set(promptHashStr!, { status: 'failed' })
+                    _log(`  [CACHE] Native API caching failed. Marked as failed. Falling back to inline systemInstruction. Reason: ${err?.message}`)
+                }
+            } else {
+                _promptCacheMap.set(promptHashStr!, { status: 'too_short' })
+                _log(`  [CACHE] Skipped Native API Caching: System prompt length (${pureSystemPrompt.length} chars) is too short. (Model '${geminiModel}' requires ~${minCacheLength}+ chars)`)
+            }
+        } 
+        else if (cacheEntry.status === 'active' && cacheEntry.name) {
+            // TTL 1분 미만 남았을 시 갱신 처리
+            const timeRemainingMs = (cacheEntry.expireTimeMs ?? 0) - Date.now()
+            if (timeRemainingMs < 60000) {
+                _log(`  [CACHE] Reusing existing API CachedContent: ${cacheEntry.name} (TTL remaining: ${Math.round(timeRemainingMs/1000)}s - Updating TTL...)`)
+                try {
+                    const ttlSeconds = 600
+                    await ai.caches.update({
+                        name: cacheEntry.name,
+                        ttl: { seconds: ttlSeconds }
+                    } as any)
+                    cacheEntry.expireTimeMs = Date.now() + (ttlSeconds * 1000)
+                    _log(`  [CACHE] Successfully extended TTL for ${cacheEntry.name} by ${ttlSeconds}s`)
+                } catch (err: any) {
+                    _log(`  [CACHE] Failed to extend TTL for ${cacheEntry.name}, it may expire soon. Reason: ${err?.message}`)
+                }
+            } else {
+                _log(`  [CACHE] Reusing existing API CachedContent: ${cacheEntry.name} (TTL remaining: ${Math.round(timeRemainingMs/1000)}s)`)
+            }
+        }
+        else if (cacheEntry.status === 'failed') {
+            _log(`  [CACHE] Native caching previously failed for this prompt. Skipping re-attempt.`)
+        }
+        else if (cacheEntry.status === 'too_short') {
+            _log(`  [CACHE] System prompt previously marked too short (${pureSystemPrompt.length} chars). Skipping re-attempt.`)
+        }
     }
 
     if (pureSystemPrompt && !cachedContentName) {
@@ -253,7 +297,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
     const tokenInfo = usageMetadata
         ? `tokens:${JSON.stringify(usageMetadata)}`
         : `~${Math.round(fullText.length / 2)}tok est.`
-    _log(`${reqTag}[GEMINI←] ${ts1} ${ms}ms | ${tokenInfo}\n  [assistant] ${fullText.slice(0, 800)}${fullText.length > 800 ? '...' : ''}`)
+    _log(`${reqTag}[GEMINI←] ${ts1} ${ms}ms | ${tokenInfo}\n  [assistant] ${fullText}`)
     // ──────────────────────────────────────────────────────────
 
     await onEvent({ type: 'finish', finishReason: 'stop', usage: usageMetadata })
