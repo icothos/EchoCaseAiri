@@ -1,3 +1,7 @@
+import WebSocket from 'ws'
+
+global.WebSocket = WebSocket as any
+
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { env, platform } from 'node:process'
@@ -145,7 +149,7 @@ app.whenReady().then(async () => {
     callback: noop,
   })
 
-  injeca.start().catch(err => console.error(err))
+  await injeca.start().catch(err => console.error(err))
 
   // Lifecycle
   emitAppReady()

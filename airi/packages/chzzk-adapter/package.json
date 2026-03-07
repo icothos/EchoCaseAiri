@@ -1,0 +1,27 @@
+{
+  "name": "@proj-airi/chzzk-adapter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chzzk adapter for Project Airi",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "auth": "tsx src/auth-cli.ts",
+    "build": "echo 'No build required'"
+  },
+  "dependencies": {
+    "@proj-airi/server-sdk": "workspace:*",
+    "axios": "catalog:",
+    "chzzk": "latest",
+    "dotenv": "^16.4.5",
+    "nanoid": "^5.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "catalog:",
+    "@types/node": "^24.10.14",
+    "@types/ws": "^8.5.10",
+    "express": "catalog:",
+    "tsx": "^4.21.0"
+  }
+}

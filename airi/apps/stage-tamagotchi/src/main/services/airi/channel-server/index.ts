@@ -389,6 +389,10 @@ export function setupServerChannelHandlers() {
   })
 
   onAppReady(async () => {
+    console.log('\n\n======================================================')
+    console.log('🚀 [App Ready Hook] All windows are fully loaded!')
+    console.log('🔌 Now starting the global WebSocket Server on port 6121...')
+    console.log('======================================================\n\n')
     const options = getChannelServerConfig()
     await setupServerChannel(options)
   })

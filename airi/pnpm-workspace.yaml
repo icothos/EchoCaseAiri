@@ -32,6 +32,7 @@ catalog:
   '@proj-airi/unplugin-fetch': ^0.2.2
   '@shopify/draggable': ^1.2.1
   '@types/audioworklet': ^0.0.96
+  '@types/express': ^5.0.6
   '@types/hast': ^3.0.4
   '@types/splitpanes': ^2.2.6
   '@types/unist': ^3.0.3
@@ -49,6 +50,7 @@ catalog:
   '@xsai/tool': ^0.4.3
   '@xsai/utils-chat': 0.4.0-beta.13
   async-mutex: 0.5.0
+  axios: npm:feaxios@^0.0.23
   better-auth: ^1.4.19
   builder-util-runtime: ^9.5.1
   crossws: ^0.4.4
@@ -56,6 +58,7 @@ catalog:
   electron: ^40.6.1
   embla-carousel-vue: ^9.0.0-rc01
   es-toolkit: 1.43.0
+  express: ^5.2.1
   histoire: 1.0.0-beta.1
   hono: 4.11.3
   idb-keyval: ^6.2.2
