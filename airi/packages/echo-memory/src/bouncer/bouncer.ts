@@ -45,7 +45,7 @@ export function createBouncer(options: BouncerOptions & { logger?: LLMLoggerInst
         systemPrompt: string,
         userText: string,
     ): Promise<string> {
-        const startedAt = logger.request('BOUNCER', `Viewer: ${userText}`, model, userText)
+        const startedAt = logger.request('BOUNCER', `Viewer: ${userText}`, model)
 
         // Gemini native SDK 경로
         if (isGeminiUrl(baseUrl) && apiKey) {
