@@ -120,6 +120,9 @@ Capable of
     - [x] Pure in-browser database support (DuckDB WASM | `pglite`)
     - [x] Real-time Context Pipeline (Echo-Memory with Snapshot Syncing)
     - [ ] Memory Alaya (WIP)
+  - [x] Agentic Search Integration
+    - [x] Grok Native Search (Web, X)
+    - [x] Gemini Google Search Retrieval
   - [ ] Pure in-browser local (WebGPU) inference
 - [x] Ears
   - [x] Audio input from browser

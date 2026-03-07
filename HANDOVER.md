@@ -65,6 +65,14 @@
   - Vercel AI SDK (`@ai-sdk/xai`) 기반의 스트리밍 및 텍스트 델타, 툴 콜(Function Call) 포맷 처리 및 `GrokStreamChunk` 맵핑 구현.
   - `gemini-utils`와 동일한 수준의 측정(관측성) 보장을 위해 DJB2(cyrb53) 기반 프롬프트 해싱, 정적 캐시 중복 텍스트 생략 필터, Request ID 매핑 로직 구축.
   - xAI API의 브라우저 전면단 CORS(OPTIONS Preflight 405 Error) 차단 정책을 로컬에서 우회하기 위해, Electron Main 프로세스의 렌더러 창 생성 구문(`mainWindow`, `chatWindow`, `settingsWindow`, `captionWindow`, `widgetsWindow`)들에 `webSecurity: false` 속성을 부여하여 에러 없이 통신되도록 조치.
+  - **(New!) Grok Native Agentic Search (Web / X Search) 완료:** Bouncer의 의도 검열 결과(`__RAG_INTENT__`)에 따라 조건부로, 혹은 항시 작동하도록 `VITE_GROK_SEARCH_MODE` 환경 변수(`always`, `rag`, `none`)를 신설함.
+  - **(New!) 인용구(Citation) 찌꺼기 차단 하드코딩:** Vercel SDK를 우회하여 X.ai 백엔드에 직접 `include: ["no_inline_citations"]` 배열을 꽂아넣어 대화 도중 `[1]` 등의 번호가 렌더링을 망치는 것을 방어하도록 Fetch Middleware 후킹 완료. 내부적인 Tool Call 횟수도 병합하여 Token Usage 정보에 깔끔하게 표출시킴.
+
+### 7-1. Gemini Native Agentic Search 연동 [✅ 해결됨]
+- **요구사항:** Gemini의 `googleSearchRetrieval` 도구를 Grok과 동일한 Bouncer 로직 위에서 동작토록 연동.
+- **조치:** 
+  - `VITE_GEMINI_SEARCH_MODE`를 신설하고, Stage UI Router에서 `attachSearchTools` 플래그를 넘기도록 규격 통일.
+  - `gemini-utils` 내부 파이프라인에서 Bouncer나 Summarizer같은 백그라운드 Worker들은 해당 툴 영향을 받지 않도록(망상이나 요약 시에 검색을 돌리지 않도록) `callGemini`와 분리된 `streamGemini`에만 배열 조립식으로 Search Tool을 주입하도록 완벽 격리.
 
 ### 8. 전용 Fish Audio API 추가
 - **요구사항:** TTS 파이프라인(목소리)의 오픈소스/고품질 대안 모델로 다변화.
