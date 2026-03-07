@@ -119,7 +119,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
         } else {
             promptLog = `  [system (PromptNode Persona)] [NEW_PROMPT_HASH: ${promptHashStr}]\n${pureSystemPrompt}\n`
         }
-        
+
         if (extractedDynamicContext) {
             promptLog += `  [system (Injected Dynamic Context)]\n${extractedDynamicContext}\n`
         }
@@ -164,7 +164,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
         // 1. 기존 캐시가 액티브 상태라면 유효성을 점검하고, 필요시 갱신하거나 만료 처리(재생성을 위해)
         if (cacheEntry?.status === 'active' && cacheEntry.name) {
             const timeRemainingMs = (cacheEntry.expireTimeMs ?? 0) - Date.now()
-            
+
             if (timeRemainingMs <= 0) {
                 _log(`  [CACHE] API CachedContent expired (0s remaining). Dropping from local tracking to recreate immediately.`)
                 _promptCacheMap.delete(promptHashStr!)
@@ -172,7 +172,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
                 cachedContentName = undefined
             }
             else if (timeRemainingMs < 60000) {
-                _log(`  [CACHE] Reusing existing API CachedContent: ${cacheEntry.name} (TTL remaining: ${Math.round(timeRemainingMs/1000)}s - Updating TTL...)`)
+                _log(`  [CACHE] Reusing existing API CachedContent: ${cacheEntry.name} (TTL remaining: ${Math.round(timeRemainingMs / 1000)}s - Updating TTL...)`)
                 try {
                     const ttlSeconds = 600
                     await ai.caches.update({
@@ -202,7 +202,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
                             systemInstruction: pureSystemPrompt,
                         },
                         contents: [
-                            { role: 'user', parts: [{ text: "Initializing context cache" }] } 
+                            { role: 'user', parts: [{ text: "Initializing context cache" }] }
                         ],
                         ttl: { seconds: ttlSeconds }, // 10 minutes TTL
                     } as any)
@@ -224,7 +224,7 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
                 _promptCacheMap.set(promptHashStr!, { status: 'too_short' })
                 // _log(\`  [CACHE] Skipped Native API Caching: System prompt length (\${pureSystemPrompt.length} chars) is too short.\`)
             }
-        } 
+        }
         else if (cacheEntry.status === 'failed') {
             // _log(\`  [CACHE] Native caching previously failed for this prompt. Skipping re-attempt.\`)
         }

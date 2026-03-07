@@ -14,6 +14,7 @@ export interface ChatHookRegistry {
   onAssistantMessage: (cb: (message: StreamingAssistantMessage, messageText: string, context: ChatStreamEventContext) => Promise<void>) => () => void
   onChatTurnComplete: (cb: (chat: { output: StreamingAssistantMessage, outputText: string, toolCalls: ToolMessage[] }, context: ChatStreamEventContext) => Promise<void>) => () => void
   onAutoSpeak: (cb: (sessionId?: string) => Promise<void>) => () => void
+  onAssistantSpeechComplete: (cb: (payload: { sessionId: string; isInterrupted: boolean; playedText: string }) => Promise<void>) => () => void
   emitBeforeMessageComposedHooks: (message: string, context: Omit<ChatStreamEventContext, 'composedMessage'>) => Promise<void>
   emitAfterMessageComposedHooks: (message: string, context: ChatStreamEventContext) => Promise<void>
   emitBeforeSendHooks: (message: string, context: ChatStreamEventContext) => Promise<void>
@@ -25,6 +26,7 @@ export interface ChatHookRegistry {
   emitAssistantMessageHooks: (message: StreamingAssistantMessage, messageText: string, context: ChatStreamEventContext) => Promise<void>
   emitChatTurnCompleteHooks: (chat: { output: StreamingAssistantMessage, outputText: string, toolCalls: ToolMessage[] }, context: ChatStreamEventContext) => Promise<void>
   emitAutoSpeakHooks: (sessionId?: string) => Promise<void>
+  emitAssistantSpeechCompleteHooks: (payload: { sessionId: string; isInterrupted: boolean; playedText: string }) => Promise<void>
   clearHooks: () => void
 }
 
@@ -40,6 +42,7 @@ export function createChatHooks(): ChatHookRegistry {
   const onAssistantMessageHooks: Array<(message: StreamingAssistantMessage, messageText: string, context: ChatStreamEventContext) => Promise<void>> = []
   const onChatTurnCompleteHooks: Array<(chat: { output: StreamingAssistantMessage, outputText: string, toolCalls: ToolMessage[] }, context: ChatStreamEventContext) => Promise<void>> = []
   const onAutoSpeakHooks: Array<(sessionId?: string) => Promise<void>> = []
+  const onAssistantSpeechCompleteHooks: Array<(payload: { sessionId: string; isInterrupted: boolean; playedText: string }) => Promise<void>> = []
 
   function onBeforeMessageComposed(cb: (message: string, context: Omit<ChatStreamEventContext, 'composedMessage'>) => Promise<void>) {
     onBeforeMessageComposedHooks.push(cb)
@@ -140,6 +143,15 @@ export function createChatHooks(): ChatHookRegistry {
     }
   }
 
+  function onAssistantSpeechComplete(cb: (payload: { sessionId: string; isInterrupted: boolean; playedText: string }) => Promise<void>) {
+    onAssistantSpeechCompleteHooks.push(cb)
+    return () => {
+      const index = onAssistantSpeechCompleteHooks.indexOf(cb)
+      if (index >= 0)
+        onAssistantSpeechCompleteHooks.splice(index, 1)
+    }
+  }
+
   function clearHooks() {
     onBeforeMessageComposedHooks.length = 0
     onAfterMessageComposedHooks.length = 0
@@ -152,6 +164,7 @@ export function createChatHooks(): ChatHookRegistry {
     onAssistantMessageHooks.length = 0
     onChatTurnCompleteHooks.length = 0
     onAutoSpeakHooks.length = 0
+    onAssistantSpeechCompleteHooks.length = 0
   }
 
   async function emitBeforeMessageComposedHooks(message: string, context: Omit<ChatStreamEventContext, 'composedMessage'>) {
@@ -209,6 +222,12 @@ export function createChatHooks(): ChatHookRegistry {
       await hook(sessionId)
   }
 
+  async function emitAssistantSpeechCompleteHooks(payload: { sessionId: string; isInterrupted: boolean; playedText: string }) {
+    console.info(`[ChatHooks] emitAssistantSpeechCompleteHooks called with payload:`, payload, `(Listeners count: ${onAssistantSpeechCompleteHooks.length})`)
+    for (const hook of onAssistantSpeechCompleteHooks)
+      await hook(payload)
+  }
+
   return {
     onBeforeMessageComposed,
     onAfterMessageComposed,
@@ -221,6 +240,7 @@ export function createChatHooks(): ChatHookRegistry {
     onAssistantMessage,
     onChatTurnComplete,
     onAutoSpeak,
+    onAssistantSpeechComplete,
     emitBeforeMessageComposedHooks,
     emitAfterMessageComposedHooks,
     emitBeforeSendHooks,
@@ -232,6 +252,7 @@ export function createChatHooks(): ChatHookRegistry {
     emitAssistantMessageHooks,
     emitChatTurnCompleteHooks,
     emitAutoSpeakHooks,
+    emitAssistantSpeechCompleteHooks,
     clearHooks,
   }
 }

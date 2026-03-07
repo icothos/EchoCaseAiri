@@ -46,7 +46,9 @@ export function useHotContextManager() {
               weight: 100, // High weight so it's always included
               ttl: 999999999, // Effectively infinite TTL
               createdAt: mtimeMs,
-              nodeType: 'context_summary' // 구조화된 요약 노드로 취급
+              nodeType: 'context_summary', // 구조화된 요약 노드로 취급
+              speaker: '시스템 (런타임 지시)',
+              topic: '런타임 및 시스템 설정'
             })
             console.info('[HotContextManager] Ingested Run Context into Echo Memory Pool.')
           }
@@ -98,7 +100,9 @@ export function useHotContextManager() {
                 weight: 90,
                 ttl: 999999999, // Infinite TTL
                 createdAt: mtimeMs,
-                nodeType: 'context_summary'
+                nodeType: 'context_summary',
+                speaker: '시스템 (대본)',
+                topic: '방송 대본 및 핫 시나리오'
              })
           }
         } else {
@@ -108,7 +112,9 @@ export function useHotContextManager() {
             weight: 90, // High weight to be prioritized over older chat nodes
             ttl: 999999999, // Infinite TTL
             createdAt: mtimeMs, // Tie creation to file modification
-            nodeType: 'context_summary'
+            nodeType: 'context_summary',
+            speaker: '시스템 (대본)',
+            topic: '방송 대본 및 핫 시나리오'
           })
         }
       } else {

@@ -116,8 +116,9 @@ Capable of
   - [x] Play [Factorio](https://www.factorio.com) (WIP, but [PoC and demo available](https://github.com/moeru-ai/airi-factorio))
   - [x] Chat in [Telegram](https://telegram.org)
   - [x] Chat in [Discord](https://discord.com)
-  - [ ] Memory
+  - [x] Memory
     - [x] Pure in-browser database support (DuckDB WASM | `pglite`)
+    - [x] Real-time Context Pipeline (Echo-Memory with Snapshot Syncing)
     - [ ] Memory Alaya (WIP)
   - [ ] Pure in-browser local (WebGPU) inference
 - [x] Ears

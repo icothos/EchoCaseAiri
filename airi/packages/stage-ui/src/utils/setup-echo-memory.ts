@@ -1,5 +1,6 @@
 import { useChatContextStore } from '../stores/chat/context-store'
 import { useChatOrchestratorStore } from '../stores/chat'
+import { useChatSessionStore } from '../stores/chat/session-store'
 
 // A flag to ensure we don't try to mount multiple times if called concurrently
 let isEchoMemoryMounting = false
@@ -70,9 +71,11 @@ export async function setupEchoMemory() {
 
         const chatOrchestratorStore = useChatOrchestratorStore()
         const chatContextStore = useChatContextStore()
+        const chatSessionStore = useChatSessionStore()
 
             ; (window as any).__echoMemory = mountEchoMemory(
                 chatOrchestratorStore,
+                chatSessionStore,
                 chatContextStore,
                 {
                     bouncer: {

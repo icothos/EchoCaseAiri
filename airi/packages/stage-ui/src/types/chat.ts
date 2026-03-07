@@ -67,5 +67,6 @@ export type ChatStreamEvent
     | { type: 'assistant-end', message: string, sessionId: string, context: ChatStreamEventContext }
     | { type: 'assistant-message', message: ChatAssistantMessage, sessionId: string, messageText: string, context: ChatStreamEventContext }
     | { type: 'auto-speak', sessionId?: string }
+    | { type: 'assistant-speech-complete', payload: { sessionId: string; isInterrupted: boolean; playedText: string } }
 
 export type StreamingAssistantMessage = ChatAssistantMessage & { context?: ContextMessage } & { createdAt?: number, id?: string }

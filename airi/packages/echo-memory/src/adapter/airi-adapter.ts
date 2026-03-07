@@ -53,7 +53,11 @@ function isDuplicate(text: string): boolean {
 export function mountEchoMemory(
     chatOrchestratorStore: {
         onBeforeMessageComposed: (handler: any) => () => void
-        onChatTurnComplete: (handler: any) => () => void
+        onBeforeSend: (handler: any) => () => void
+        onAssistantSpeechComplete: (handler: any) => () => void
+    },
+    chatSessionStore: {
+        getSessionMessages: (sessionId: string) => any[]
     },
     chatContextStore: {
         ingestContextMessage: (msg: any) => void
@@ -76,6 +80,9 @@ export function mountEchoMemory(
     const summarizer = createSummarizer(summarizerEndpoint, options.summarizer, progressEndpoint)
 
     const cleanups: Array<() => void> = []
+    
+    // T_1 스냅샷을 담을 공간 (Session별)
+    const contextSnapshots = new Map<string, { topNodes: any[], chatLog: string }>()
 
     // ② Hot Context 주입 및 Bouncer: LLM 호출 직전
     // (Bouncer가 await 되어야 메인 LLM이 기다려 줌)
@@ -99,14 +106,12 @@ export function mountEchoMemory(
                 // eslint-disable-next-line no-console
                 console.debug('[echo-memory] Bouncer: rag (미구현)', text.slice(0, 40))
             }
-
-            summarizer.addMessage('user', result.cleanText || text)
         }
 
         // Hot Context 주입: 동일 SourceKey에서 Overwrite 되지 않도록 하나로 병합하여 주입
         const topNodes = pool.getTopK()
         if (topNodes.length > 0) {
-            const combinedContent = topNodes.map(node => `[Echo 기억] ${node.content}`).join('\n\n')
+            const combinedContent = topNodes.map(node => `[Echo 기억 (Weight: ${node.weight})] ${node.content}`).join('\n\n')
             const id = nanoid()
             chatContextStore.ingestContextMessage({
                 id,
@@ -131,22 +136,92 @@ export function mountEchoMemory(
         }
     }))
 
-    // ③ AI 응답 완료 후: Progress 업데이트 + Summarizer 트리거 + autoSpeak 타이머 리셋
-    cleanups.push(chatOrchestratorStore.onChatTurnComplete(async ({ outputText }: { outputText: string }) => {
-        summarizer.addMessage('assistant', outputText)
+    // ③ 스냅샷 캡처 (T_1): LLM 스트리밍 직전
+    cleanups.push(chatOrchestratorStore.onBeforeSend(async (_: any, context: any) => {
+        const sessionId = context.sessionId
+        if (!sessionId) {
+            console.warn('[EchoMemory] onBeforeSend: no sessionId in context')
+            return
+        }
 
-        const topNode = pool.getTopK(1).find(n => n.nodeType === 'context_summary')
-        const progressText = await summarizer.generateProgressSummary(
-            outputText,
-            topNode?.contextSummary,
-        )
+        const topNodes = pool.getTopK().filter((n: any) => n.nodeType === 'context_summary').map((n: any) => ({ ...n }))
+        const msgs = chatSessionStore.getSessionMessages(sessionId) || []
+        
+        // 최근 20개의 메시지만 잘라서 ChatLog로 만듦 (과도한 토큰 소모 방지)
+        const recentMsgs = msgs.slice(-20)
+        const chatLog = recentMsgs.map((m: any) => `${m.role === 'user' ? 'User' : 'Airi'}: ${m.content}`).join('\n')
 
-        if (progressText)
-            pool.updateTopNode({ progressSummary: [progressText] }, 'context_summary')
-        else
-            pool.updateTopContextProgress(outputText.slice(0, 80))
+        console.info(`[EchoMemory] Snapshot captured for session=${sessionId}, topNodes=${topNodes.length}`)
+        contextSnapshots.set(sessionId, { topNodes, chatLog })
+    }))
 
-        void summarizer.maybeRunSummarizer(pool)
+    // ④ AI 발화 완전 종료 (또는 인터럽트) 시: Progress Bot 가동
+    cleanups.push(chatOrchestratorStore.onAssistantSpeechComplete(async (payload: { sessionId: string; isInterrupted: boolean; playedText: string }) => {
+        const { sessionId, isInterrupted, playedText } = payload
+        console.info(`[EchoMemory] onAssistantSpeechComplete received for session=${sessionId}, isInter=${isInterrupted}, length=${playedText?.length}`)
+        
+        const snapshot = contextSnapshots.get(sessionId)
+        
+        // 스냅샷이 없으면 판단 불가로 스킵
+        if (!snapshot) {
+            console.warn(`[EchoMemory] No snapshot found for session=${sessionId}, skipping Progress Summarizer`)
+            return
+        }
+        
+        if (!playedText || !playedText.trim()) {
+            console.warn(`[EchoMemory] Played text is empty for session=${sessionId}, skipping Progress Summarizer`)
+            return
+        }
+
+        console.info(`[EchoMemory] Triggering decideContextUpdate for session=${sessionId} with text preview: ${playedText.slice(0, 40)}...`)
+        const decision = await summarizer.decideContextUpdate(playedText, isInterrupted, snapshot.topNodes, snapshot.chatLog)
+        console.info(`[EchoMemory] Progress Bot decision:`, decision)
+        
+        // 판단이 끝났으므로 맵에서 스냅샷 제거
+        contextSnapshots.delete(sessionId)
+        
+        if (decision) {
+            switch (decision.action) {
+                case 'create':
+                    pool.addNode({
+                        content: `[${decision.topic}] ${decision.speaker} | 분위기: ${decision.mood}\n맥락: ${decision.contextSummary}\n진행: ${decision.progressSummary}`,
+                        weight: decision.weight !== undefined ? decision.weight : 50.0,
+                        ttl: 300,
+                        nodeType: 'context_summary',
+                        topic: decision.topic ?? '',
+                        speaker: decision.speaker ?? '시청자',
+                        contextSummary: decision.contextSummary ?? '',
+                        progressSummary: decision.progressSummary ? [decision.progressSummary] : [],
+                        mood: decision.mood ? [decision.mood] : [],
+                    })
+                    break
+                case 'update':
+                    if (decision.targetNodeId) {
+                        const targetNode = pool.allNodes().find((n: any) => n.id === decision.targetNodeId)
+                        if (targetNode) {
+                           pool.updateNode(decision.targetNodeId, {
+                               progressSummary: decision.progressSummary ? [decision.progressSummary] : [],
+                               weight: decision.weight !== undefined ? decision.weight : targetNode.weight
+                           })
+                        } else {
+                           pool.updateTopNode({
+                               progressSummary: decision.progressSummary ? [decision.progressSummary] : [],
+                               weight: decision.weight
+                           }, 'context_summary')
+                        }
+                    } else {
+                        pool.updateTopNode({
+                            progressSummary: decision.progressSummary ? [decision.progressSummary] : [],
+                            weight: decision.weight
+                        }, 'context_summary')
+                    }
+                    break
+                case 'skip':
+                default:
+                    // 아무것도 하지 않음 (의미없는 대화 지속)
+                    break
+            }
+        }
     }))
 
     return {

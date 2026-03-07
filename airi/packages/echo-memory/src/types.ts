@@ -46,6 +46,17 @@ export interface SummarizerResult {
     weight: number
 }
 
+export interface ContextUpdateDecision {
+    action: 'skip' | 'update' | 'create'
+    targetNodeId?: string // The ID of the node to update (for 'update')
+    topic?: string
+    speaker?: string
+    contextSummary?: string
+    progressSummary?: string
+    mood?: string
+    weight?: number
+}
+
 /**
  * mountEchoMemory() 에 전달하는 전체 설정.
  *

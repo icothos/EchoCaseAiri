@@ -255,6 +255,12 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
 
           broadcastStreamEvent({ type: 'auto-speak', sessionId })
         }),
+        chatOrchestrator.onAssistantSpeechComplete(async (payload) => {
+          if (isProcessingRemoteStream)
+            return
+
+          broadcastStreamEvent({ type: 'assistant-speech-complete', payload })
+        }),
       )
 
       const { stop: stopIncomingStreamWatch } = watch(incomingStreamEvent, async (event) => {
@@ -328,6 +334,11 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
               // Otherwise, the local ingest triggered by auto-speak will have its outbound broadcasts blocked!
               chatOrchestrator.emitAutoSpeakHooks(event.sessionId).catch((err) => {
                 console.error('[context-bridge] Error during remote auto-speak:', err)
+              })
+              break
+            case 'assistant-speech-complete':
+              chatOrchestrator.emitAssistantSpeechCompleteHooks(event.payload).catch((err) => {
+                console.error('[context-bridge] Error during remote assistant-speech-complete:', err)
               })
               break
           }

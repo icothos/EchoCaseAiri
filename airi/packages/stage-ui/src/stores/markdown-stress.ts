@@ -339,7 +339,7 @@ export const useMarkdownStressStore = defineStore('markdownStress', () => {
     } as ChatProvider
 
     const originalStream = llm.stream
-    llm.stream = async (_model, _provider, _messages, options) => {
+    llm.stream = async (_model, _provider, _promptNode, _messages, options) => {
       const runner = createMockStream({
         scenario: targetScenario,
         timer: mockTimer,

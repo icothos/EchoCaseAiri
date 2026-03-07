@@ -377,9 +377,17 @@ speechPipeline.on('onIntentEnd', (_intentId) => {
 })
 
 // onStart: TTS 오디오 재생 시작 시점 → text 포함하여 windows:chat에 started 신호 전송 → 텍스트 표시
+let isAutoSpeakScheduled = false
+let lastCompletedSpeechToken = ''
+const turnSpokenText = new Map<string, string>()
+
 playbackManager.onStart(({ item }) => {
   if (item.text && !item.special && item.sessionId) {
     sessionBusContext.emit(sessionTtsSegmentStartedEvent, { sessionId: item.sessionId, text: item.text })
+    const token = item.intentId || currentTurnToken.value
+    if (token) {
+      turnSpokenText.set(token, (turnSpokenText.get(token) || '') + item.text.trim() + ' ')
+    }
   }
 })
 
@@ -404,6 +412,16 @@ playbackManager.onInterrupt(({ item, reason }) => {
   }
   nowSpeaking.value = false
   mouthOpenSize.value = 0
+
+  if (item.sessionId) {
+    const tokenToMark = item.intentId || currentTurnToken.value
+    if (tokenToMark && lastCompletedSpeechToken !== tokenToMark) {
+      lastCompletedSpeechToken = tokenToMark
+      const playedText = turnSpokenText.get(tokenToMark) || ''
+      console.info(`[Stage] emitAssistantSpeechCompleteHooks (INTERRUPTED) for session=${item.sessionId}, token=${tokenToMark}, playedTextLength=${playedText.length}`)
+      void chatOrchestrator.emitAssistantSpeechCompleteHooks({ sessionId: item.sessionId, isInterrupted: true, playedText })
+    }
+  }
 })
 
 playbackManager.onReject(({ item, reason }) => {
@@ -413,6 +431,16 @@ playbackManager.onReject(({ item, reason }) => {
   }
   nowSpeaking.value = false
   mouthOpenSize.value = 0
+
+  if (item.sessionId) {
+    const tokenToMark = item.intentId || currentTurnToken.value
+    if (tokenToMark && lastCompletedSpeechToken !== tokenToMark) {
+      lastCompletedSpeechToken = tokenToMark
+      const playedText = turnSpokenText.get(tokenToMark) || ''
+      console.info(`[Stage] emitAssistantSpeechCompleteHooks (REJECTED) for session=${item.sessionId}, token=${tokenToMark}, playedTextLength=${playedText.length}`)
+      void chatOrchestrator.emitAssistantSpeechCompleteHooks({ sessionId: item.sessionId, isInterrupted: true, playedText })
+    }
+  }
 })
 
 playbackManager.onStart(({ item }) => {
@@ -541,8 +569,6 @@ chatHookCleanups.push(onAssistantResponseEnd(async (_message, _context) => {
   // 예전에는 여기서 Auto-Speak을 초기 호출했으나 유저 요청으로 오직 오디오 재생이 끝난 시점 (playbackManager.onEnd) 에서만 스케줄합니다.
 }))
 
-let isAutoSpeakScheduled = false
-
 function tryScheduleAutoSpeak(token: string | undefined, sessionId: string | undefined, _debugReason: string) {
   if (!token) return
 
@@ -561,6 +587,15 @@ function tryScheduleAutoSpeak(token: string | undefined, sessionId: string | und
     // 4. WebAudio 큐에 대기중인 항목이 없을 때만 스케줄!
     const isProcessing = speechRuntimeStore.isProcessing()
     if (!isSending && !isProcessing && activePlaybackCount === 0 && waitingPlaybackCount === 0) {
+      if (lastCompletedSpeechToken !== token && sessionId) {
+        lastCompletedSpeechToken = token
+        const playedText = turnSpokenText.get(token) || ''
+        console.info(`[Stage] emitAssistantSpeechCompleteHooks (NATURAL END) for session=${sessionId}, token=${token}, playedTextLength=${playedText.length}`)
+        void chatOrchestrator.emitAssistantSpeechCompleteHooks({ sessionId, isInterrupted: false, playedText })
+        // Clear memory to prevent leak
+        turnSpokenText.delete(token)
+      }
+
       isAutoSpeakScheduled = true
 
       void chatOrchestrator.scheduleAutoSpeak(token, Number(import.meta.env.VITE_AUTO_SPEAK_IDLE_MS ?? 5_000), sessionId).finally(() => {
