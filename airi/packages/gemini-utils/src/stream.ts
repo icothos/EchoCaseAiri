@@ -157,6 +157,36 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
             minCacheLength = 8000
         }
 
+        // 1. 기존 캐시가 액티브 상태라면 유효성을 점검하고, 필요시 갱신하거나 만료 처리(재생성을 위해)
+        if (cacheEntry?.status === 'active' && cacheEntry.name) {
+            const timeRemainingMs = (cacheEntry.expireTimeMs ?? 0) - Date.now()
+            
+            if (timeRemainingMs <= 0) {
+                _log(`  [CACHE] API CachedContent expired (0s remaining). Dropping from local tracking to recreate immediately.`)
+                _promptCacheMap.delete(promptHashStr!)
+                cacheEntry = undefined
+                cachedContentName = undefined
+            }
+            else if (timeRemainingMs < 60000) {
+                _log(`  [CACHE] Reusing existing API CachedContent: ${cacheEntry.name} (TTL remaining: ${Math.round(timeRemainingMs/1000)}s - Updating TTL...)`)
+                try {
+                    const ttlSeconds = 600
+                    await ai.caches.update({
+                        name: cacheEntry.name,
+                        ttl: { seconds: ttlSeconds }
+                    } as any)
+                    cacheEntry.expireTimeMs = Date.now() + (ttlSeconds * 1000)
+                    _log(`  [CACHE] Successfully extended TTL for ${cacheEntry.name} by ${ttlSeconds}s`)
+                } catch (err: any) {
+                    _log(`  [CACHE] Failed to extend TTL for ${cacheEntry.name} (Server rejected). Dropping cache to recreate immediately. Reason: ${err?.message}`)
+                    _promptCacheMap.delete(promptHashStr!)
+                    cacheEntry = undefined
+                    cachedContentName = undefined
+                }
+            }
+        }
+
+        // 2. 캐시가 없거나, 방금 만료되어 지워진 상태라면 즉시 신규 캐시 생성 시도
         if (!cacheEntry) {
             if (pureSystemPrompt.length >= minCacheLength) {
                 _log(`  [CACHE] Attempting to create Native API Content Cache... (Length: ${pureSystemPrompt.length} chars, requires >= ${minCacheLength})`)
@@ -164,10 +194,12 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
                     const ttlSeconds = 600
                     const cacheResult = await ai.caches.create({
                         model: geminiModel,
+                        config: {
+                            systemInstruction: pureSystemPrompt,
+                        },
                         contents: [
-                            { role: 'user', parts: [{ text: "Initializing context cache" }] } // Minimal user fallback if needed
+                            { role: 'user', parts: [{ text: "Initializing context cache" }] } 
                         ],
-                        systemInstruction: { parts: [{ text: pureSystemPrompt }] },
                         ttl: { seconds: ttlSeconds }, // 10 minutes TTL
                     } as any)
 
@@ -186,34 +218,14 @@ export async function streamGemini(opts: GeminiStreamOptions): Promise<void> {
                 }
             } else {
                 _promptCacheMap.set(promptHashStr!, { status: 'too_short' })
-                _log(`  [CACHE] Skipped Native API Caching: System prompt length (${pureSystemPrompt.length} chars) is too short. (Model '${geminiModel}' requires ~${minCacheLength}+ chars)`)
+                // _log(\`  [CACHE] Skipped Native API Caching: System prompt length (\${pureSystemPrompt.length} chars) is too short.\`)
             }
         } 
-        else if (cacheEntry.status === 'active' && cacheEntry.name) {
-            // TTL 1분 미만 남았을 시 갱신 처리
-            const timeRemainingMs = (cacheEntry.expireTimeMs ?? 0) - Date.now()
-            if (timeRemainingMs < 60000) {
-                _log(`  [CACHE] Reusing existing API CachedContent: ${cacheEntry.name} (TTL remaining: ${Math.round(timeRemainingMs/1000)}s - Updating TTL...)`)
-                try {
-                    const ttlSeconds = 600
-                    await ai.caches.update({
-                        name: cacheEntry.name,
-                        ttl: { seconds: ttlSeconds }
-                    } as any)
-                    cacheEntry.expireTimeMs = Date.now() + (ttlSeconds * 1000)
-                    _log(`  [CACHE] Successfully extended TTL for ${cacheEntry.name} by ${ttlSeconds}s`)
-                } catch (err: any) {
-                    _log(`  [CACHE] Failed to extend TTL for ${cacheEntry.name}, it may expire soon. Reason: ${err?.message}`)
-                }
-            } else {
-                _log(`  [CACHE] Reusing existing API CachedContent: ${cacheEntry.name} (TTL remaining: ${Math.round(timeRemainingMs/1000)}s)`)
-            }
-        }
         else if (cacheEntry.status === 'failed') {
-            _log(`  [CACHE] Native caching previously failed for this prompt. Skipping re-attempt.`)
+            // _log(\`  [CACHE] Native caching previously failed for this prompt. Skipping re-attempt.\`)
         }
         else if (cacheEntry.status === 'too_short') {
-            _log(`  [CACHE] System prompt previously marked too short (${pureSystemPrompt.length} chars). Skipping re-attempt.`)
+            // _log(\`  [CACHE] System prompt previously marked too short (\${pureSystemPrompt.length} chars). Skipping re-attempt.\`)
         }
     }
 
