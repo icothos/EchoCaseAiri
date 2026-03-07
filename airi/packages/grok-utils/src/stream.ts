@@ -51,7 +51,21 @@ export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
         onLog?.(line)
     }
 
-    const xaiOptions: any = { apiKey }
+    const xaiOptions: any = {
+        apiKey,
+        fetch: async (url: string, init?: RequestInit) => {
+            if (attachSearchTools && init?.body && typeof init.body === 'string') {
+                try {
+                    const parsed = JSON.parse(init.body)
+                    parsed.include = ['no_inline_citations']
+                    init.body = JSON.stringify(parsed)
+                } catch (e) {
+                    // Ignore parse errors safely
+                }
+            }
+            return fetch(url, init)
+        }
+    }
 
     const xai = createXai(xaiOptions)
 
@@ -175,6 +189,7 @@ export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
         const result = streamText(fetchOptions)
 
         let fullText = ''
+        const usedTools: string[] = []
 
         // Listen to full stream chunks to catch text, tool calls and finish events
         for await (const chunk of result.fullStream) {
@@ -183,6 +198,7 @@ export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
                 fullText += textValue
                 await onEvent({ type: 'text-delta', text: textValue })
             } else if (chunk.type === 'tool-call') {
+                usedTools.push(chunk.toolName)
                 await onEvent({
                     type: 'tool-call',
                     toolCallId: chunk.toolCallId,
@@ -206,10 +222,23 @@ export async function streamGrok(opts: GrokStreamOptions): Promise<void> {
                     } : {})
                 } : null
 
-                const tokenInfo = usageMetadata
+                let tokenInfo = usageMetadata
                     ? `tokens:${JSON.stringify(usageMetadata)}`
                     : `~${Math.round(fullText.length / 2)}tok est.`
 
+                if (usedTools.length > 0) {
+                    const toolCounts = usedTools.reduce((acc, tool) => {
+                        acc[tool] = (acc[tool] || 0) + 1
+                        return acc
+                    }, {} as Record<string, number>)
+                    
+                    const toolsStr = Object.entries(toolCounts)
+                        .map(([tool, count]) => `${tool}: ${count}`)
+                        .join(', ')
+                        
+                    tokenInfo += ` | tools_used: { ${toolsStr} }`
+                }
+                
                 _log(`${reqTag}[GROK←] ${ts1} ${ms}ms | ${tokenInfo}\n  [assistant] ${fullText}`)
 
                 await onEvent({
