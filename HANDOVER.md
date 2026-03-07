@@ -13,8 +13,10 @@
 - **조치:** 
   - 앱 초기 기동 시 읽어올 수 있는 전역 컨텍스트(`run_context.md`) 주입 기능 완료.
   - 외부 연동이나 이벤트 트리거로 작동하는 동적 컨텍스트(`hot_context.md`) 연동 방식(폴링) 신설. 파일 내용이 수정될 때만 무한 TTL(`999999999`) 노드를 강제로 갈아치워(Remove -> Add) 불필요한 풀 업데이트 스팸을 방지.
-  - 앱 초기 기동 시 Echo-Memory Pool이 마운트되기 직전에 `hot-context.ts`가 싱크를 맞추려다 5초를 날려먹는 지연(Race Condition)을 막기 위해, Pool이 준비되지 않았을 경우 1초(1000ms) 뒤 자가 재시도(Retry)하도록 회복 코드 작성 완료.
   - Echo-Memory의 `HotContextPool`에 `onUpdate` 훅을 달아 메모리 변경점(`ADD`, `UPDATE`, `REMOVE`)을 추적할 수 있는 기반 마련.
+  - **(New!) Lazy TTL 평가 기반 메모리 관리:** 노드의 수명(TTL) 초과 관리를 별도의 틱(Tick) 타이머로 삭제하는 방식이 아닌, 조회 시점(`getTopK`, `isActive`)에 실시간으로 나이(Age)를 검사해 필터링하는 게으른 판별(Lazy Evaluation) 방식을 채택하여 성능 낭비를 줄임. 만료된 노드들은 향후 Cold Context DB 이관 목적으로 `getArchivableNodes` 함수를 통해 일괄 수거할 수 있도록 파이프라인 정비 완료.
+  - **(New!) Stateful History 추적 고도화:** `mood` 및 `progressSummary`를 단순 덮어쓰지 않고 `[]` 배열 형식으로 누적 관리. `rebuildContent()` 과정에서 누적 내역을 기반으로 `분위기 변화: A -> B`, `진행 변화: 1... 2...` 형태로 직관적인 시계열 텍스트로 자동 조합.
+  - **(New!) 외부 컨텍스트 자동 요약 매핑:** 파일 병합 시 단순 `chat` 타입이 아닌 `context_summary`로 주입하고 원본 텍스트를 `contextSummary` 배경 맥락으로, `progressSummary`에 "방금 대화가 시작되었거나 진행 전 상태입니다." 문구를 자동 할당하도록 초기화 과정 매핑 구축 완료.
 
 ### 3. Cold Context 추가 및 관리 로직 (RAG & Vector Embedding)
 - **요구사항:** 장기 기억(Cold Context)의 물리적 보관 및 조회(검색) 기능 신설.
@@ -61,8 +63,8 @@
   - 기존 ElevenLabs 외에 Fish Audio (Fish Speech) API 또는 로컬 서버를 `speech-pipeline.ts` 호환으로 렌더러에 연동 가능 하도록 Provider 확장.
   - 버퍼링 오디오 플레이어 로직에 Fish Audio의 스트리밍 chunk PCM 규격 적용.
 
-### 9. Summarizer 및 Progressor 로직 고도화
+### 9. Summarizer 및 Progressor 로직 고도화 (다음 진행 목표)
 - **요구사항:** 대화 요약 밀도 확보 및 장기 상태 업데이트 품질 향상.
-- **조치:** 
-  - 대화 슬라이딩 윈도우가 가득 찼을 때 요약(Summarizer)하는 프롬프트를 개선하여, 캐릭터 성격과 맥락이 묽어지는(Catastrophic Forgetting) 현상 최소화.
-  - 사용자와 캐릭터 간의 관계성 진척도나 특이사항이 바뀌었을 때, 이를 장기 기억 노드(`progress_summary`)에 얼마나 섬세하게 갱신(Update/Merge)할지 Prompting 최적화 및 평가 모니터링 방식 도입.
+- **조치 (예정):** 
+  - **채팅 요약 기반 Hot Pool 노드 Update/Add 분기:** 대화 슬라이딩 윈도우가 가득 찼을 때 단순 요약(Summarizer)하는 것에 그치지 않고, 새로 파악한 내용을 새 노드로 만들지 기존 요약 노드들에 병합 및 업데이트 할지 상태 추론 엔진 추가 로직 마련.
+  - **장문 Content 동일 포맷 압축(Freeze):** 단일 노드의 `content`가 컨텍스트 한계를 위협할 만큼 너무 길어질 경우, `isContentFrozen` (의도적 덮어쓰기) 기능을 활용하여 낡은 텍스트를 버리지 않고 동일한 프롬프트 포맷 규격으로 한 번 더 압축해 덮어쓰고, 또 다시 배열로 새로운 맥락을 이어나가는 효율화 관리 로직 추가.
