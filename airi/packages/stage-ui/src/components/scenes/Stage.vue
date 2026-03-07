@@ -508,7 +508,7 @@ import { shallowRef } from 'vue'
 
 const currentChatIntent = shallowRef<ReturnType<typeof speechRuntimeStore.openIntent> | null>(null)
 
-chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
+chatHookCleanups.push(onBeforeMessageComposed(async (_message, _context) => {
   setupAnalyser()
   await setupLipSync()
   // Reset assistant caption for a new message
@@ -525,7 +525,9 @@ chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
   catch (error) {
     console.warn('[Stage] Failed to post present reset (channel may be closed)', { error })
   }
+}))
 
+chatHookCleanups.push(onBeforeSend(async (_message, context) => {
   if (currentChatIntent.value) {
     currentChatIntent.value = null
   }
@@ -539,12 +541,10 @@ chatHookCleanups.push(onBeforeMessageComposed(async (_message, context) => {
     priority: 'normal',
     behavior: 'queue',
   })
-}))
 
-chatHookCleanups.push(onBeforeSend(async (message) => {
   // 채팅 로그: 유저 메시지
   const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
-  ;(window as any).logChat?.(`[${ts}] [User] ${message}`)
+  ;(window as any).logChat?.(`[${ts}] [User] ${_message}`)
   currentMotion.value = { group: EmotionThinkMotionName }
 }))
 
