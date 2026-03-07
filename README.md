@@ -183,9 +183,36 @@ Gemini 스트리밍 로그는 `gemini-utils/stream.ts` 내부에서 처리.
 
 ---
 
-## 🚀 다음 단계
+## Chzzk Adapter (치지직 연동)
 
-1. **Bugfix**: 일반 채팅의 사용자 입력 중복 UI 렌더링 추적 및 `session-store` 동기화 로직 디버깅
-2. P7: 치지직 어댑터 연결
-3. P8: Cold DB RAG (pgvector)
-4. (선택) Gemini tools 강제 활성화 방안 discovery (현재 tools 사용 불가능 해결)하게
+> **로컬 포크 전용** — `Packages/chzzk-adapter`에 위치한 커스텀 치지직(Chzzk) 채팅 연동 어댑터입니다.
+
+Airi의 로컬 WebSocket 통신 서버(포트 6121)와 통신하여 치지직 방송의 실시간 채팅을 Airi 엔진으로 넘겨줍니다.
+
+### 패치 내역 (버전 대응)
+
+최근 로컬 환경에서 다음과 같은 치명적인 통신 버그 2종을 수정하여 어댑터 연동을 안정화했습니다.
+
+1. **에러 1: `global.WebSocket is not defined`**
+   - **원인**: 데스크톱 버전(`stage-tamagotchi`)의 메인 사이드(Node.js)에는 크롬과 달리 네이티브 웹소켓이 존재하지 않아 연결 거부됨.
+   - **해결**: `apps/stage-tamagotchi/src/main/index.ts` 최상단에 `ws` 라이브러리의 `WebSocket` 구현체를 전역(Global) 폴리필로 강제 주입.
+2. **에러 2: `[injeca] RUNNING` 이후 서버 포트(6121)가 안 열리는 증상**
+   - **원인**: 의존성 트리 로딩 메서드인 `injeca.start()`에 비동기 대기(`await`) 키워드가 누락되어 발생한 레이스 컨디션.
+   - **해결**: `await injeca.start()`로 비동기 대기를 추가하여 서버 포트가 정상 오픈되도록 수정.
+
+---
+
+## 🚀 앞으로의 개발 계획 (Roadmap: `feat/chat_upgrade`)
+
+현재 브랜치(`feat/chat_upgrade`)에서는 Airi의 인지 모델 및 채팅 파이프라인 전반을 업그레이드할 예정입니다.
+> 📌 **자세한 9가지 세부 작업 명세서**는 프로젝트 루트의 [`HANDOVER.md`](./HANDOVER.md) 문서를 참고해 주세요.
+
+1. Bouncer 텍스트 중복 로직 수정
+2. Hot Context 메모리 관리 로직 고도화 및 설정 UI 연동
+3. Cold Context 파이프라인 추가 (RAG 및 Vector Embedding 검색)
+4. 치지직(Chzzk) 챗 입력/출력 포맷 검증 및 파싱 최적화
+5. Tamagotchi 내부 설정 윈도우 및 채팅 UI 팝업 on/off 토글 구현
+6. 추론 추적성 관리를 위한 3대장(Bouncer/Summarizer/Progressor) Hash Log 체계 구축
+7. 전용 Grok API 지원 (xAI)
+8. 전용 Fish Audio API 연동 (대안 보이스)
+9. Summarizer & Progressor의 장/단기 밀도 있는 기억 갱신 프롬프트 및 로직 고도화
