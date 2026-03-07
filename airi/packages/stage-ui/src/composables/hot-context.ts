@@ -29,7 +29,7 @@ export function useHotContextManager() {
         if (pool) {
           // Check if already exist to prevent redundant updates
           const existings = pool.allNodes?.().filter((n: any) => n.id === 'app-run-context') || []
-          if (existings.length > 0 && existings[0].content === content.trim()) {
+          if (existings.length > 0 && existings[0].rawContent === content.trim()) {
             return // Skip redundant update
           }
 
@@ -82,9 +82,16 @@ export function useHotContextManager() {
         if (existings.length > 0) {
           const existingNode = existings[0]
           // Only update if content or creation time significantly changed
-          if (existingNode.content !== content.trim() || existingNode.createdAt !== mtimeMs) {
-             // Remove the older node and recreate it as explicitly requested
-             pool.removeNodes(['app-hot-context'])
+          if (existingNode.rawContent !== content.trim() || existingNode.createdAt !== mtimeMs) {
+             // 기존 노드를 지우지 않고 가중치와 수명을 낮춰 자연스럽게 사라지게(Demote) 만듦
+             pool.updateNode('app-hot-context', {
+                 id: `old-hot-context-${Date.now()}`,
+                 weight: 10, // 중요도 대폭 하락
+                 ttl: 300, // 5분 후 만료
+                 createdAt: Date.now() // TTL 카운트다운 리셋
+             })
+             
+             // 새로운 최신 노드를 추가
              pool.addNode({
                 id: 'app-hot-context',
                 content: content.trim(),
@@ -105,8 +112,16 @@ export function useHotContextManager() {
           })
         }
       } else {
-        // file empty or doesn't exist. Delete it from pool.
-        pool.removeNodes(['app-hot-context'])
+        // file empty or doesn't exist. 즉시 지우지 않고 서서히 퇴역(Demote)시킴
+        const existings = pool.allNodes?.().filter((n: any) => n.id === 'app-hot-context') || []
+        if (existings.length > 0) {
+             pool.updateNode('app-hot-context', {
+                 id: `old-hot-context-${Date.now()}`,
+                 weight: 10,
+                 ttl: 300,
+                 createdAt: Date.now()
+             })
+        }
       }
     } catch (e) {
       console.error('[HotContextManager] Error polling Hot Context:', e)
