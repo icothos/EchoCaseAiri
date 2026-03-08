@@ -204,27 +204,48 @@ export function mountEchoMemory(
                         mood: decision.mood ? [decision.mood] : [],
                     })
                     break
-                case 'update':
-                    if (decision.targetNodeId) {
-                        const targetNode = pool.allNodes().find((n: any) => n.id === decision.targetNodeId)
-                        if (targetNode) {
-                           pool.updateNode(decision.targetNodeId, {
-                               progressSummary: decision.progressSummary ? [decision.progressSummary] : [],
-                               weight: decision.weight !== undefined ? decision.weight : targetNode.weight
-                           })
-                        } else {
-                           pool.updateTopNode({
-                               progressSummary: decision.progressSummary ? [decision.progressSummary] : [],
-                               weight: decision.weight
-                           }, 'context_summary')
+                case 'update': {
+                    let targetNode = decision.targetNodeId 
+                        ? pool.allNodes().find((n: any) => n.id === decision.targetNodeId)
+                        : undefined
+
+                    if (!targetNode) {
+                        const active = pool.allNodes().filter((n: any) => {
+                            const isExpired = (Date.now() - n.createdAt) > n.ttl * 1000
+                            return !isExpired && !n.completed && n.nodeType === 'context_summary'
+                        })
+                        if (active.length > 0) {
+                            targetNode = active.reduce((a: any, b: any) => (a.weight >= b.weight ? a : b))
                         }
-                    } else {
-                        pool.updateTopNode({
+                    }
+
+                    if (targetNode) {
+                        const targetId = targetNode.id
+                        const upcomingProgressList = [...targetNode.progressSummary]
+                        if (decision.progressSummary) upcomingProgressList.push(decision.progressSummary)
+
+                        if (upcomingProgressList.length >= 10) {
+                            console.info(`[EchoMemory] Node ${targetId} progressSummary length >= 10, compressing...`)
+                            const compressed = await summarizer.compressNodeContext(targetNode.contextSummary, upcomingProgressList, targetNode.topic)
+                            if (compressed) {
+                                pool.updateNode(targetId, {
+                                    content: compressed.newContextSummary,
+                                    contextSummary: compressed.newContextSummary,
+                                    progressSummary: compressed.newProgressSummary,
+                                    weight: decision.weight !== undefined ? decision.weight : targetNode.weight,
+                                    isContentFrozen: true
+                                })
+                                break
+                            }
+                        }
+
+                        pool.updateNode(targetId, {
                             progressSummary: decision.progressSummary ? [decision.progressSummary] : [],
-                            weight: decision.weight
-                        }, 'context_summary')
+                            weight: decision.weight !== undefined ? decision.weight : targetNode.weight
+                        })
                     }
                     break
+                }
                 case 'skip':
                 default:
                     // 아무것도 하지 않음 (의미없는 대화 지속)

@@ -178,9 +178,109 @@ ${aiResponse}`
         }
     }
 
+    /**
+     * 누적된 progressSummary 배열의 길이가 임계치에 도달했을 때,
+     * 기존 contextSummary와 전체 progressSummary를 하나의 contextSummary로 요약 압축합니다.
+     */
+    async function compressNodeContext(
+        contextSummary: string,
+        progressSummary: string[],
+        topic: string,
+    ): Promise<{ newContextSummary: string; newProgressSummary: string[] } | null> {
+        if (!progressSummary || progressSummary.length === 0) return null
+
+        const systemPrompt = `IMPORTANT: Respond ONLY in raw JSON format. No markdown, no backticks. Do not use Chinese or any other language except English and Korean.
+You are a context deep-compressor for a VTuber stream. Your job is to take an existing context summary and a list of progressive changes, and merge them into a new, heavily condensed context summary. Also provide a short list (1 to 3 items) representing the current or latest state of the conversation.
+Output ONLY a JSON object exactly matching this schema:
+{
+  "newContextSummary": "string (Korean, 1-3 lines combining the old context and the progress logs into a meaningful coherent summary)",
+  "newProgressSummary": ["string (Korean, 1 line representing a key ongoing state or concluded point. Up to 3 items.)"]
+}
+
+Rules:
+1. Retain the core meaning of the conversation, but remove redundant steps.
+2. The output must be valid JSON.`
+
+        const userPrompt = `Topic: ${topic}
+
+Old Context Summary:
+${contextSummary || '(None)'}
+
+Progress Steps to Compress:
+${progressSummary.map((p, i) => `${i + 1}. ${p}`).join('\n')}
+
+Please compress this history.`
+
+        const reqId = logger.request('PROGRESS', userPrompt, progressModel, '(Compress)', systemPrompt)
+
+        try {
+            let raw: string
+
+            if (isGeminiUrl(progressBaseUrl) && progressApiKey) {
+                raw = await callGemini({
+                    apiKey: progressApiKey,
+                    model: progressModel,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt },
+                    ],
+                    temperature: 0.1,
+                    maxOutputTokens: 512,
+                    timeoutMs: progressTimeoutMs,
+                })
+            }
+            else {
+                const url = `${progressBaseUrl.replace(/\/$/, '')}/v1/chat/completions`
+                const body = JSON.stringify({
+                    model: progressModel,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt },
+                    ],
+                    temperature: 0.1,
+                    max_tokens: 512,
+                    stream: false,
+                })
+                const controller = new AbortController()
+                const timer = setTimeout(() => controller.abort(), progressTimeoutMs)
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...progressAuthHeaders },
+                        body,
+                        signal: controller.signal,
+                    })
+                    raw = ((await res.json() as any)?.choices?.[0]?.message?.content ?? '').trim()
+                }
+                finally {
+                    clearTimeout(timer)
+                }
+            }
+
+            logger.response('PROGRESS', raw, reqId, progressModel)
+            
+            if (raw.startsWith('```json'))
+                raw = raw.slice(7)
+            if (raw.endsWith('```'))
+                raw = raw.slice(0, -3)
+            raw = raw.trim()
+
+            const parsed = JSON.parse(raw)
+            return {
+                newContextSummary: parsed.newContextSummary ?? '(Compressed)',
+                newProgressSummary: Array.isArray(parsed.newProgressSummary) ? parsed.newProgressSummary : (parsed.newProgressSummary ? [parsed.newProgressSummary] : []),
+            }
+        }
+        catch (err) {
+            console.warn('[ProgressSummarizer] compressNodeContext failed:', err)
+            return null
+        }
+    }
+
     return {
         addMessage,
         decideContextUpdate,
+        compressNodeContext,
         getMessageCount,
     }
 }
