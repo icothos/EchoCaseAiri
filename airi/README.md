@@ -370,6 +370,49 @@ flowchart TD
   style Memory_PGVector fill:#f9f9d4,stroke:#333,stroke-width:1px
 ```
 
+## Core System Architecture (Airi Pipeline)
+
+AIRI is an autonomous AI streamer engine that runs generation, audio playback, and system controls concurrently. The interactions are managed heavily based on events rather than straightforward chat-and-response paradigms.
+
+```mermaid
+flowchart TD
+    subgraph Input
+        C[Chat Stream]
+    end
+    
+    subgraph Pipeline
+        B[Buffer / Filter / Deduplicate]
+        S[Message Selection]
+        CS[Hot Context / State]
+        LLM[LLM Streaming Generation]
+        CH[Sentence Chunker]
+        TTS[TTS Generator Queue]
+    end
+    
+    subgraph Output
+        AV[Avatar & Audio Render]
+    end
+    
+    subgraph Control_Plane
+        IC[Interrupt Policy / Safety]
+        MC[Admin Interventions]
+    end
+
+    C --> B
+    B --> S
+    S --> CS
+    CS --> LLM
+    LLM --> CH
+    CH --> TTS
+    TTS --> AV
+    
+    IC -.->|Cancel/Preempt| LLM
+    IC -.->|Flush Audio| TTS
+    MC -.-> CS
+```
+
+> **Note:** The pipeline enables **Sentence-Boundary Interrupts** — meaning the AI can naturally stop mid-sentence or accurately switch topics upon a new chat injection without dropping the logic state, ensuring both prompt responsiveness and natural broadcasting rhythm.
+
 ## Similar Projects
 
 ### Open sourced ones
